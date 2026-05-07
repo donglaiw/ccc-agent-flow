@@ -110,7 +110,7 @@ Use these stage skills:
 ccc-plan
 ccc-plan-review
 ccc-code
-ccc-review
+ccc-code-review
 ```
 
 `ccc-code` handles both initial implementation and review-driven revisions.

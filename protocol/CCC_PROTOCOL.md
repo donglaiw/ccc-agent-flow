@@ -240,5 +240,5 @@ ccc
 ccc-plan
 ccc-plan-review
 ccc-code
-ccc-review
+ccc-code-review
 ```

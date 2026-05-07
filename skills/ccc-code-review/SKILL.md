@@ -1,8 +1,8 @@
 ---
-name: ccc-review
-description: CCC review stage. Review code_vN.md and actual repository changes. Reviewer-only; do not edit code.
+name: ccc-code-review
+description: CCC code review stage. Review code_vN.md and actual repository changes. Reviewer-only; do not edit code.
 ---
-# Skill: CCC Review
+# Skill: CCC Code Review
 
 Use this skill only inside a CCC run.
 
