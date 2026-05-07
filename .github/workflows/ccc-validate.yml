@@ -1,0 +1,17 @@
+name: CCC Validate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+jobs:
+  validate-example:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate bundled CCC example
+        run: scripts/ccc-validate.sh examples/runs/hello-world

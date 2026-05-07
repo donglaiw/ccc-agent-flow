@@ -7,7 +7,6 @@ if [ "$#" -ne 1 ]; then
 fi
 
 python3 - "$1" <<'PY'
-import os
 import re
 import sys
 from pathlib import Path
@@ -16,7 +15,8 @@ RUN = Path(sys.argv[1])
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
 VERDICT_RE = re.compile(r"^VERDICT: (APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER)$")
-STAGE_RE = re.compile(r"^(plan_v(0|[1-9][0-9]*)|plan_v(0|[1-9][0-9]*)_review|code_v(0|[1-9][0-9]*)|review_v(0|[1-9][0-9]*))$")
+VERSION = r"(?:0|[1-9][0-9]*)"
+STAGE_RE = re.compile(rf"^(?:plan_v{VERSION}|plan_v{VERSION}_review|code_v{VERSION}|review_v{VERSION})$")
 
 CONTRACTS = {
     "plan": [
@@ -90,11 +90,11 @@ def non_empty_section(path: Path, text: str, name: str) -> str:
     return body
 
 
-def parse_run_md() -> tuple[str, str]:
+def parse_run_md() -> tuple[str, str, dict]:
     run_md = RUN / "run.md"
     text = read(run_md)
     if not text:
-        return "", ""
+        return "", "", {}
 
     if text.count("# CCC Run") != 1:
         err("run.md: expected exactly one '# CCC Run' heading")
@@ -166,7 +166,26 @@ def parse_run_md() -> tuple[str, str]:
     if expected_role == "none" and status and status not in TERMINAL_STATUS:
         err("run.md: expected_role none is only valid for terminal statuses")
 
-    return run_start_ref, status
+    if status in TERMINAL_STATUS and expected_role and expected_role != "none":
+        err("run.md: terminal statuses require expected_role: none")
+
+    expected_waiting = {
+        "complete": "complete",
+        "blocked": "blocked",
+        "max-rounds-reached": "max-rounds-reached",
+        "canceled": "canceled",
+    }
+    if status in expected_waiting and next_waiting_for != expected_waiting[status]:
+        err(f"run.md: Status {status} requires next_waiting_for: {expected_waiting[status]}")
+
+    if status == "waiting" and not next_waiting_for.startswith("state/"):
+        err("run.md: Status waiting requires next_waiting_for: state/<stage>.done")
+
+    current_done = RUN / "state" / f"{current_stage}.done"
+    if current_stage and current_stage != "none" and not current_done.exists():
+        err(f"run.md: current_stage requires done file {current_done}")
+
+    return run_start_ref, status, workflow
 
 
 def artifact_kind(path: Path):
@@ -242,23 +261,72 @@ def validate_done_file(path: Path) -> None:
         err(f"{path}: status must be complete")
 
     if artifact:
+        expected_artifact = f"artifacts/{stage}.md" if stage else None
+        if expected_artifact and artifact != expected_artifact:
+            err(f"{path}: artifact must be {expected_artifact}")
         if not (RUN / artifact).exists():
             err(f"{path}: artifact path missing: {artifact}")
     else:
         err(f"{path}: missing artifact")
 
 
+def expected_artifact_path(stage: str) -> Path:
+    return RUN / "artifacts" / f"{stage}.md"
+
+
+def artifact_stage(path: Path) -> str:
+    return path.stem
+
+
+def validate_sequential_versions(artifact_paths: list[Path]) -> None:
+    by_kind = {}
+    for path in artifact_paths:
+        kind, version, _ = artifact_kind(path)
+        if kind is None:
+            continue
+        by_kind.setdefault(kind, set()).add(version)
+
+    for kind, versions in by_kind.items():
+        for version in versions:
+            for prior in range(version):
+                if prior not in versions:
+                    err(f"artifacts: {kind} v{version} requires {kind} v{prior}")
+
+
+def validate_artifact_done_pairs(artifact_paths: list[Path]) -> None:
+    for path in artifact_paths:
+        stage = artifact_stage(path)
+        done_path = RUN / "state" / f"{stage}.done"
+        if not done_path.exists():
+            err(f"{path}: missing matching done file {done_path}")
+
+
+def validate_terminal_locks(status: str) -> None:
+    locks = RUN / "state" / "locks"
+    if not locks.exists():
+        return
+
+    if status in TERMINAL_STATUS:
+        for path in locks.iterdir():
+            if path.name != ".gitkeep":
+                err(f"{locks}: terminal run must not contain stale lock {path.name}")
+
+
 def main() -> int:
     if not RUN.exists() or not RUN.is_dir():
         err(f"run folder does not exist: {RUN}")
-    run_start_ref, _ = parse_run_md()
+    run_start_ref, status, _ = parse_run_md()
 
     artifacts = RUN / "artifacts"
+    artifact_paths = []
     if not artifacts.is_dir():
         err(f"missing artifacts directory: {artifacts}")
     else:
-        for path in sorted(artifacts.glob("*.md")):
+        artifact_paths = sorted(artifacts.glob("*.md"))
+        for path in artifact_paths:
             validate_artifact(path, run_start_ref)
+        validate_sequential_versions(artifact_paths)
+        validate_artifact_done_pairs(artifact_paths)
 
     state = RUN / "state"
     if not state.is_dir():
@@ -266,6 +334,7 @@ def main() -> int:
     else:
         for path in sorted(state.glob("*.done")):
             validate_done_file(path)
+        validate_terminal_locks(status)
 
     if errors:
         for message in errors:
