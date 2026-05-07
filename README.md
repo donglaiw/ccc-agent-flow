@@ -4,7 +4,7 @@ Minimal CCC skill design for coordinating coding collaboration between Claude Co
 
 ## Usage
 
-Open two interactive sessions in the same repository.
+Open two interactive sessions in the same repository and alternate turns between them.
 
 Session 1, acting as `a1`:
 
@@ -25,90 +25,33 @@ Use the ccc skill as a1 with output folder .ccc/runs/auth-fix, task "Given the c
 Use the ccc skill as a2 with output folder .ccc/runs/auth-fix and rounds 2,2.
 ```
 
-The last argument is optional. Omitting it uses the default:
+`a1` owns planning and code changes. `a2` reviews both plans and code. The roles are intentionally positional so two interactive sessions can coordinate through artifacts and `.done` files.
+
+The canonical workflow, artifact names, verdicts, validation rules, locking rules, and round semantics live in [protocol/CCC_PROTOCOL.md](protocol/CCC_PROTOCOL.md).
+
+## Waiting
+
+The optional wait helper only waits for a `.done` file. It does not coordinate the workflow.
 
 ```text
-2,2
+scripts/ccc-wait-done.sh --timeout 600 .ccc/runs/auth-fix/state/plan_v0_review.done
 ```
 
-Each session should rerun `/ccc ...` after the other role completes its `.done` file.
-
-For waiting, use the optional helper:
+Exit codes:
 
 ```text
-.ccc/hooks/ccc-wait-done.sh .ccc/runs/auth-fix/state/plan_v0_review.done
+0    file appeared
+2    usage error
+124  timeout
 ```
 
-The helper only waits for a file. It does not coordinate the workflow.
+## Example
 
-## Rounds
-
-CCC uses zero-based versions.
-
-The final `2,2` means:
-
-```text
-2 plan revision rounds after plan_v0
-2 code revision rounds after code_v0
-```
-
-Planning:
-
-```text
-plan_v0 -> plan_v0_review -> plan_v1 -> plan_v1_review -> plan_v2
-```
-
-Code/review:
-
-```text
-code_v0 -> review_v0 -> code_v1 -> review_v1 -> code_v2
-```
-
-`code_v0` is the initial implementation plus a reviewer-ready summary.
-
-`code_v1+` are revisions based on the previous review plus updated summaries.
-
-The final plan or code version after the last allowed revision is not reviewed unless the user increases the round limit.
-
-## Artifacts
-
-The output folder is always explicit. Do not use `.ccc/current_run`.
-
-Example run folder:
-
-```text
-.ccc/runs/auth-fix/
-  task.md
-  run.md
-  artifacts/
-    plan_v0.md
-    plan_v0_review.md
-    plan_v1.md
-    plan_v1_review.md
-    plan_v2.md
-    code_v0.md
-    review_v0.md
-    code_v1.md
-    review_v1.md
-    code_v2.md
-  state/
-    plan_v0.done
-    plan_v0_review.done
-    plan_v1.done
-    plan_v1_review.done
-    plan_v2.done
-    code_v0.done
-    review_v0.done
-    code_v1.done
-    review_v1.done
-    code_v2.done
-```
-
-The run folder has no `logs/` and no `context/`.
+See [examples/runs/hello-world](examples/runs/hello-world) for a complete small run with plan, review, code, follow-up review, state sentinels, and `run.md`.
 
 ## Skills
 
-Use these stage skills:
+Use these skills:
 
 ```text
 ccc
@@ -117,5 +60,3 @@ ccc-plan-review
 ccc-code
 ccc-code-review
 ```
-
-`ccc-code` handles both initial implementation and later review-driven revisions.

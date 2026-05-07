@@ -4,7 +4,7 @@ description: CCC planning stage. Write or revise plan_vN.md from the task and pr
 ---
 # Skill: CCC Plan
 
-Use this skill only inside a CCC run.
+Use this skill only inside a CCC run. Read `protocol/CCC_PROTOCOL.md` first and follow its artifact contract for `plan_vN.md`.
 
 ## Inputs
 
@@ -30,29 +30,11 @@ For `plan_v1+`:
 
 Do not write `.done`.
 
-## Required Structure
-
-```text
-# Plan vN
-## Summary
-## Scope
-## Proposed Changes
-## Files and Areas
-## Verification Plan
-## Risks and Questions
-## Changes Since Previous Plan Version
-```
-
-For `plan_v0`, write `Initial plan.` under `Changes Since Previous Plan Version`.
-
-For `plan_v1+`, summarize what changed in response to the previous plan review.
-
 ## Rules
 
 * Do not edit code during planning.
 * Keep the plan scoped to the task.
-* Address prior review findings directly.
-* Do not silently ignore plan review findings.
+* For `plan_v1+`, directly address the prior plan review findings in `Changes Since Previous Plan Version`.
+* Do not silently ignore review findings.
 * Include concrete verification steps.
 * Do not write review artifacts.
-* Do not write `.done`.

@@ -1,5 +1,7 @@
 # CCC Protocol
 
+This file is the canonical CCC workflow specification. README files and skills should point here instead of repeating these rules.
+
 CCC is an interactive two-role coordinator workflow. The output folder is always explicit.
 
 Do not use `.ccc/current_run`.
@@ -9,6 +11,7 @@ Do not use `.ccc/current_run`.
 ```text
 /ccc a1 <output_folder> "<task>" [plan_rounds,revision_rounds]
 /ccc a2 <output_folder> [plan_rounds,revision_rounds]
+/ccc cancel <output_folder> "<reason>"
 ```
 
 For Codex:
@@ -16,53 +19,19 @@ For Codex:
 ```text
 Use the ccc skill as a1 with output folder <output_folder>, task "<task>", and rounds 2,2.
 Use the ccc skill as a2 with output folder <output_folder> and rounds 2,2.
-```
-
-Examples:
-
-```text
-/ccc a1 .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
-/ccc a2 .ccc/runs/auth-fix 2,2
+Use the ccc skill to cancel output folder <output_folder> with reason "<reason>".
 ```
 
 If rounds are omitted, use `2,2`.
 
-## Arguments
-
-`a1 | a2`
-
-Role for the current interactive session.
-
-`<output_folder>`
-
-The exact CCC run folder. The coordinator creates this folder if needed.
-
-`"<task>"`
-
-Task text. Required for `a1` when starting a new run. For `a2`, read the task from `<output_folder>/task.md`.
-
-`[plan_rounds,revision_rounds]`
-
-Optional rounds in `N,M` format.
-
-`plan_rounds` is the number of allowed plan revisions after `plan_v0`.
-
-`revision_rounds` is the number of allowed code revisions after `code_v0`.
-
-## Run Folder
-
-Inside `<output_folder>`, CCC writes:
+## Roles
 
 ```text
-task.md
-run.md
-artifacts/
-state/
+a1  writes plans and code artifacts; may edit repository code during code stages
+a2  reviews plans and code artifacts; must not edit repository code
 ```
 
-The run folder must not contain CCC-managed `logs/` or `context/` directories.
-
-## Role Ownership
+Role ownership:
 
 ```text
 plan_vN          a1
@@ -71,24 +40,107 @@ code_vN          a1
 review_vN        a2
 ```
 
-`a1` owns implementation and summary in each `code_vN`.
+## Rounds
 
-For `code_v0`, `a1` implements, verifies, and summarizes the work as `code_v0.md`.
+CCC uses zero-based versions. The two numeric arguments are maximum version indexes, equivalent to the number of allowed revisions after the initial `v0`.
 
-For `code_v1+`, `a1` reads `review_v{N-1}.md`, fixes accepted findings, verifies, and summarizes the updated work as `code_vN.md`.
-
-## Round Semantics
-
-Example `2,2`:
+Example `2,2` allows these artifacts:
 
 ```text
 plan_v0 -> plan_v0_review -> plan_v1 -> plan_v1_review -> plan_v2
 code_v0 -> review_v0 -> code_v1 -> review_v1 -> code_v2
 ```
 
-This means initial plan plus 2 plan revisions, and initial code plus 2 code revisions.
+This is three possible plan artifacts and three possible code artifacts. The final artifact at the maximum version is a max-rounds stop point, not an approval.
 
-The final artifact after the last allowed revision is not reviewed unless the user increases the round limit.
+## Output Folder
+
+The coordinator creates the run folder if needed:
+
+```text
+<output_folder>/
+  task.md
+  run.md
+  artifacts/
+  state/
+```
+
+The run folder has no CCC-managed `logs/` or `context/` directories.
+
+## Run Metadata
+
+When starting a new run, `a1` writes `<output_folder>/task.md` and `<output_folder>/run.md`.
+
+`run.md` must include:
+
+```text
+# CCC Run
+## Role
+## Rounds
+## Task Summary
+## Git Baseline
+## Current Workflow State
+## Status
+```
+
+`Git Baseline` records the review base before code changes:
+
+```text
+run_start_ref: <git sha from `git rev-parse --verify HEAD`, or none>
+run_start_status: <summary of `git status --short`>
+run_start_status_file: state/run_start.status
+run_start_unstaged_diff: state/run_start.diff
+run_start_staged_diff: state/run_start_cached.diff
+```
+
+The coordinator writes those `state/run_start.*` files at run start. If the repository is dirty at run start, reviewers must use those baseline files to distinguish pre-existing changes from CCC changes.
+
+## Git Review Baseline
+
+`ccc-code-review` must inspect the actual repository, not only `code_vN.md`.
+
+If `run_start_ref` is a valid git ref, use it as the baseline:
+
+```text
+git status --short
+git diff --stat <run_start_ref>...HEAD
+git diff <run_start_ref>...HEAD
+git diff --cached
+git diff
+```
+
+This keeps committed mid-cycle changes reviewable. `git diff --cached` and `git diff` catch staged and unstaged changes that are not in `HEAD`.
+
+If the run started dirty, compare current status and diffs against `state/run_start.status`, `state/run_start.diff`, and `state/run_start_cached.diff` before assigning findings to the CCC run.
+
+If `run_start_ref` is `none` or invalid, the review verdict must be `VERDICT: BLOCKER` unless the user provides another explicit diff base.
+
+Each `code_vN.md` must include the run baseline and current `HEAD` under `## Git Baseline`.
+
+## Verdicts
+
+All review artifacts use the same verdict vocabulary:
+
+```text
+VERDICT: APPROVE
+VERDICT: APPROVE_WITH_MINOR_COMMENTS
+VERDICT: NEEDS_CHANGES
+VERDICT: BLOCKER
+```
+
+Validation must match exactly one whole line with this regex:
+
+```text
+^VERDICT: (APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER)$
+```
+
+Do not use substring matching.
+
+`APPROVE` and `APPROVE_WITH_MINOR_COMMENTS` allow the workflow to advance.
+
+`NEEDS_CHANGES` asks `a1` for the next plan or code version, if another version is allowed.
+
+`BLOCKER` stops the workflow for user direction.
 
 ## Planning Transitions
 
@@ -106,24 +158,16 @@ a2 writes artifacts/plan_vN_review.md
 ccc writes state/plan_vN_review.done
 ```
 
-If `plan_vN_review.md` says `VERDICT: APPROVE`, planning is complete and `a1` may write `artifacts/code_v0.md`.
+If `plan_vN_review.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, planning is approved and `a1` may write `artifacts/code_v0.md`.
 
-If `plan_vN_review.md` says `VERDICT: NEEDS_REVISION`, `a1` writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
+If `plan_vN_review.md` says `VERDICT: NEEDS_CHANGES`, `a1` writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
 
 If `plan_vN_review.md` says `VERDICT: BLOCKER`, stop.
 
-If max plan revisions are reached and the latest plan review still says `NEEDS_REVISION`, `a1` should write the final allowed plan version and stop until the user increases the limit. Example for `2,2`:
+If the final allowed plan version has been written and has no allowed review stage, do not mark the workflow complete. Stop and report:
 
 ```text
-plan_v0 -> plan_v0_review NEEDS_REVISION
-plan_v1 -> plan_v1_review NEEDS_REVISION
-plan_v2
-```
-
-At this point, no `plan_v2_review` is allowed under `2,2`. Report:
-
-```text
-Max plan revision rounds reached; latest artifact is plan_v2.md.
+Max plan version reached; latest artifact is plan_vN.md and is not approved.
 ```
 
 ## Code and Review Transitions
@@ -144,62 +188,101 @@ ccc writes state/review_vN.done
 
 If `review_vN.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, the workflow is complete.
 
-If `review_vN.md` says `VERDICT: NEEDS_CHANGES` or `VERDICT: BLOCKER`, `a1` writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
+If `review_vN.md` says `VERDICT: NEEDS_CHANGES`, `a1` writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
 
-If max code revisions are reached and the latest review still requires changes, stop and report:
+If `review_vN.md` says `VERDICT: BLOCKER`, stop unless the user explicitly directs `a1` to continue with a clear fix.
 
-```text
-Max code revision rounds reached; latest artifact is code_vN.md.
-```
-
-Example for `2,2`:
+If the final allowed code version has been written and has no allowed review stage, do not mark the workflow complete. Stop and report:
 
 ```text
-code_v0 -> review_v0 NEEDS_CHANGES
-code_v1 -> review_v1 NEEDS_CHANGES
-code_v2
+Max code version reached; latest artifact is code_vN.md and is not approved.
 ```
 
-At this point, no `review_v2` is allowed under `2,2` unless the user increases the limit.
+## Artifact Contracts
 
-## Artifact Validation
+`plan_vN.md`:
 
-Before writing `.done`, the coordinator must validate:
+```text
+# Plan vN
+## Summary
+## Scope
+## Proposed Changes
+## Files and Areas
+## Verification Plan
+## Risks and Questions
+## Changes Since Previous Plan Version
+```
+
+`plan_vN_review.md`:
+
+```text
+# Plan vN Review
+## Summary
+## Findings
+## Questions
+## Verdict
+One protocol-approved verdict line.
+```
+
+`code_vN.md`:
+
+```text
+# Code vN
+## Overview
+## What Changed
+## Implementation Details
+## Files Changed
+| File | Purpose |
+|---|---|
+## Git Baseline
+## Verification
+## Review Focus
+## Risks and Unknowns
+## Changes Since Previous Code Version
+```
+
+For `code_v0`, `Changes Since Previous Code Version` says `Initial implementation.`
+
+For `code_v1+`, it summarizes what changed in response to `review_v{N-1}.md`.
+
+`review_vN.md`:
+
+```text
+# Review vN
+## Summary
+## Diff Baseline
+## Findings
+## Tests to Add
+## Questions
+## Verdict
+One protocol-approved verdict line.
+```
+
+## Validation Before .done
+
+Before writing `.done`, the coordinator validates:
 
 ```text
 artifact exists
 artifact is non-empty
-expected top-level heading exists
-review artifacts contain exactly one valid VERDICT line
+artifact filename version matches the top-level heading version
+expected top-level heading exists exactly once
+required sections exist
+review artifacts contain exactly one valid whole-line VERDICT
+plan_v1+ and code_v1+ have a non-empty Changes Since section
 ```
 
-Expected headings:
+## Locking and Atomic Writes
+
+Before performing a stage, the coordinator creates a stage lock with an atomic `mkdir`:
 
 ```text
-plan_vN.md         # Plan vN
-plan_vN_review.md  # Plan vN Review
-code_vN.md         # Code vN
-review_vN.md       # Review vN
+<output_folder>/state/locks/<stage>.lock/
 ```
 
-Valid plan review verdicts:
+If the lock already exists and there is no corresponding `.done` file, stop and report the lock path.
 
-```text
-VERDICT: APPROVE
-VERDICT: NEEDS_REVISION
-VERDICT: BLOCKER
-```
-
-Valid code review verdicts:
-
-```text
-VERDICT: APPROVE
-VERDICT: APPROVE_WITH_MINOR_COMMENTS
-VERDICT: NEEDS_CHANGES
-VERDICT: BLOCKER
-```
-
-## Done Files
+Write artifacts and done files through a temporary file in the same directory, validate the temporary artifact, then rename it into place.
 
 Only the `ccc` coordinator skill writes `.done` files. Individual stage skills must not write `.done`.
 
@@ -229,11 +312,32 @@ Waiting for: <output_folder>/state/<stage>.done
 Next role: <a1|a2>
 ```
 
-Users may use `.ccc/hooks/ccc-wait-done.sh` or their own hooks to wait for the file externally.
+Users may use `scripts/ccc-wait-done.sh` or their own external wait mechanism.
+
+## Cancel
+
+To abandon a run, use:
+
+```text
+/ccc cancel <output_folder> "<reason>"
+```
+
+The coordinator writes or updates `run.md` with `Status: canceled`, records the reason, and stops. It does not delete artifacts.
+
+## Final Output
+
+Always end with:
+
+```text
+CCC run: <output_folder>
+Current role: <a1|a2|cancel>
+Stage completed: <stage|none>
+Next waiting point: <done-file|complete|blocked|max-rounds-reached|canceled>
+```
 
 ## Stage Skills
 
-Use these stage skills:
+Use these skills:
 
 ```text
 ccc

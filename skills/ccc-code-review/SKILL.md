@@ -1,27 +1,20 @@
 ---
 name: ccc-code-review
-description: CCC code review stage. Review code_vN.md and actual repository changes. Reviewer-only; do not edit code.
+description: CCC code review stage. Review code_vN.md and actual repository changes against the CCC git baseline. Reviewer-only; do not edit code.
 ---
 # Skill: CCC Code Review
 
-Use this skill only inside a CCC run.
+Use this skill only inside a CCC run. Read `protocol/CCC_PROTOCOL.md` first and follow its artifact contract for `review_vN.md`.
 
 ## Inputs
 
 ```text
 <RUN>/task.md
+<RUN>/run.md
 <RUN>/artifacts/code_vN.md
 ```
 
-Also inspect live repository state directly:
-
-```text
-git status --short
-git diff --stat
-git diff
-```
-
-For `review_v1+`, also read the previous review when available:
+For `review_v1+`, also read:
 
 ```text
 <RUN>/artifacts/review_v{N-1}.md
@@ -36,29 +29,10 @@ For `review_v1+`, also read the previous review when available:
 
 Do not write `.done`.
 
-## Required Structure
-
-```text
-# Review vN
-## Summary
-## Findings
-### Finding N
-**Severity:** Critical / High / Medium / Low
-**Location:**
-**Issue:**
-**Why it matters:**
-**Suggested fix:**
-## Tests to Add
-## Questions
-## Verdict
-VERDICT: APPROVE / APPROVE_WITH_MINOR_COMMENTS / NEEDS_CHANGES / BLOCKER
-```
-
 ## Rules
 
 * Do not edit code.
-* Inspect the actual git diff directly.
+* Inspect the actual git diff using the `run_start_ref` from `run.md`.
 * Do not trust `code_vN.md` alone.
 * For `review_v1+`, focus on whether prior findings were fixed and whether new issues were introduced.
-* Write exactly one valid `VERDICT:` line.
-* Do not write `.done`.
+* Use only protocol-approved verdict lines.
