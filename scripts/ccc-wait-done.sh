@@ -21,17 +21,23 @@ USAGE
 timeout_seconds=300
 interval_seconds=1
 no_timeout=0
+timeout_seen=0
+no_timeout_seen=0
 
 while [ "$#" -gt 0 ]; do
   case "$1" in
     --timeout|-t)
       [ "$#" -ge 2 ] || { usage; exit 2; }
+      [ "$no_timeout_seen" -eq 0 ] || { usage; exit 2; }
       timeout_seconds="$2"
       no_timeout=0
+      timeout_seen=1
       shift 2
       ;;
     --no-timeout)
+      [ "$timeout_seen" -eq 0 ] || { usage; exit 2; }
       no_timeout=1
+      no_timeout_seen=1
       shift
       ;;
     --interval|-i)

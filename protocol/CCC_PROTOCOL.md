@@ -78,8 +78,8 @@ When starting a new run, `a1` writes `<output_folder>/task.md`, captures the run
 
 ```text
 # CCC Run
-protocol_version: 1
 
+## Metadata
 ## Description
 ## Roles
 ## Rounds
@@ -87,6 +87,12 @@ protocol_version: 1
 ## Git Baseline
 ## Workflow State
 ## Status
+```
+
+`## Metadata` uses machine-readable fields:
+
+```text
+protocol_version: 1
 ```
 
 `## Description` is free-form text for humans.
@@ -117,6 +123,12 @@ run_start_staged_diff: state/run_start_cached.diff
 
 The coordinator writes those `state/run_start.*` files at run start. `state/run_start.status` is canonical for run-start status; do not duplicate that status inline in `run.md`.
 
+`state/run_start.status` is the exact stdout of `git status --short` at run start. An empty file means the run started clean.
+
+`state/run_start.diff` is the exact stdout of `git diff` at run start.
+
+`state/run_start_cached.diff` is the exact stdout of `git diff --cached` at run start.
+
 For normal repositories, `run_start_ref` is the output of `git rev-parse --verify HEAD` and `run_start_ref_kind` is `head`.
 
 For fresh repositories with no commits, `run_start_ref` is the Git empty-tree SHA `4b825dc642cb6eb9a060e54bf8d69288fbee4904` and `run_start_ref_kind` is `empty_tree`.
@@ -133,6 +145,18 @@ latest_verdict: <APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER|none>
 next_waiting_for: <state file|complete|blocked|max-rounds-reached|canceled>
 ```
 
+Field values are constrained:
+
+```text
+current_stage: none | plan_vN | plan_vN_review | code_vN | review_vN
+expected_role: a1 | a2 | none
+latest_artifact: none | artifacts/plan_vN.md | artifacts/plan_vN_review.md | artifacts/code_vN.md | artifacts/review_vN.md
+latest_verdict: APPROVE | APPROVE_WITH_MINOR_COMMENTS | NEEDS_CHANGES | BLOCKER | none
+next_waiting_for: state/<stage>.done | complete | blocked | max-rounds-reached | canceled
+```
+
+`expected_role: none` is only valid when status is `complete`, `canceled`, `blocked`, or `max-rounds-reached`.
+
 `## Status` must contain exactly one of:
 
 ```text
@@ -142,6 +166,17 @@ complete
 blocked
 max-rounds-reached
 canceled
+```
+
+Status semantics:
+
+```text
+active    a stage is currently in progress and the stage lock is held
+waiting   no stage is in progress and the next stage belongs to the other role
+complete  the workflow has an approving code review verdict
+blocked   the workflow has a BLOCKER verdict or cannot continue without user direction
+max-rounds-reached  the workflow exhausted the configured max version without approval
+canceled  the user canceled the run
 ```
 
 Existing runs with a different `protocol_version` must stop before writing and report the mismatch.
@@ -308,6 +343,13 @@ One protocol-approved verdict line.
 ## Changes Since Previous Code Version
 ```
 
+`## Git Baseline` must include:
+
+```text
+run_start_ref: <sha>
+current_head: <sha|none>
+```
+
 `code_v0.md` must write `Initial implementation.` in `Changes Since Previous Code Version`.
 
 `code_v1+` must summarize what changed in response to `review_v{N-1}.md`.
@@ -325,6 +367,12 @@ One protocol-approved verdict line.
 One protocol-approved verdict line.
 ```
 
+`## Diff Baseline` must include:
+
+```text
+run_start_ref: <sha>
+```
+
 ## Validation Before .done
 
 Before writing `.done`, the coordinator validates:
@@ -337,21 +385,26 @@ required sections exist exactly as listed in Artifact Contracts
 review artifacts contain exactly one valid whole-line VERDICT
 plan_v0 and code_v0 have required non-empty Changes Since text
 plan_v1+ and code_v1+ have non-empty Changes Since sections
+code_vN Git Baseline contains run_start_ref and current_head
 review_vN Diff Baseline SHA equals run_start_ref from run.md
 ```
 
 Filename-to-heading validation is exact:
 
 ```text
-plan_v(\d+)\.md          -> # Plan v\1
-plan_v(\d+)_review\.md   -> # Plan v\1 Review
-code_v(\d+)\.md          -> # Code v\1
-review_v(\d+)\.md        -> # Review v\1
+plan_v(0|[1-9][0-9]*)\.md          -> # Plan v\1
+plan_v(0|[1-9][0-9]*)_review\.md   -> # Plan v\1 Review
+code_v(0|[1-9][0-9]*)\.md          -> # Code v\1
+review_v(0|[1-9][0-9]*)\.md        -> # Review v\1
 ```
+
+Versions are decimal integers with no leading zeros except `v0`.
 
 ## Locking and Atomic Writes
 
 Before performing a stage, the coordinator derives the expected next stage and expected role. It must reject stale-role invocations before attempting any lock.
+
+If both a stage lock and `run.lock` are needed, acquire the stage lock first, then `run.lock`. Release in reverse order: `run.lock`, then the stage lock. Do not acquire these locks in the opposite order.
 
 Stage lock acquisition is the atomic test-and-set operation:
 
@@ -361,7 +414,24 @@ mkdir <output_folder>/state/locks/<stage>.lock
 
 If `mkdir` succeeds, this session owns the stage lock. If `mkdir` fails and there is no corresponding `.done` file, stop and report the lock path.
 
-Write artifacts and done files through a temporary file in the same directory, validate the temporary artifact, then rename it into place.
+Write artifacts, done files, and `run.md` through temporary files in the same directory, then rename them into place.
+
+Stage completion order is fixed:
+
+```text
+write artifact tmp
+validate artifact tmp
+rename artifact tmp to artifact
+write done tmp
+rename done tmp to done
+acquire run.lock
+write run.md tmp with updated Workflow State and Status
+rename run.md tmp to run.md
+release run.lock
+release stage lock
+```
+
+The coordinator derives the next stage from `.done` files and artifact verdicts. `run.md` is a machine-readable summary, not the source of truth for stage transitions.
 
 After the corresponding `.done` file is successfully written and synced, remove the stage lock directory:
 
@@ -369,7 +439,7 @@ After the corresponding `.done` file is successfully written and synced, remove 
 rmdir <output_folder>/state/locks/<stage>.lock
 ```
 
-If a session crashes and leaves a lock, recovery is manual: verify no peer session is still working on that stage, verify there is no corresponding `.done` file, then remove the stale lock with `rmdir <output_folder>/state/locks/<stage>.lock`.
+If a session crashes and leaves a stage lock, recovery is manual: verify no peer session is still working on that stage, verify there is no corresponding `.done` file, then remove the stale lock with `rmdir <output_folder>/state/locks/<stage>.lock`.
 
 `run.md` writes use a separate metadata lock:
 
@@ -380,7 +450,9 @@ rename run.md.tmp to run.md
 rmdir <output_folder>/state/locks/run.lock
 ```
 
-If `run.lock` already exists, stop and report it unless the user confirms stale-lock recovery.
+If `run.lock` already exists, stop and report it.
+
+If a session crashes and leaves `run.lock`, recovery is manual: verify no peer session is still updating `run.md`, inspect any `run.md.tmp`, keep or remove that temp file intentionally, then remove the stale lock with `rmdir <output_folder>/state/locks/run.lock`.
 
 Only the `ccc` coordinator skill writes `.done` files. Individual stage skills must not write `.done`.
 
@@ -420,7 +492,13 @@ To abandon a run, use:
 /ccc cancel <output_folder> "<reason>"
 ```
 
-The coordinator acquires `state/locks/run.lock`, writes or updates `run.md` with `Status: canceled`, records the reason, removes any stage locks in `state/locks/*.lock` after verifying no peer session is active, removes `state/locks/run.lock` last, and stops. It does not delete artifacts.
+Cancel must not hold `run.lock` while waiting for user confirmation. The coordinator first inspects `state/locks/*.lock`; for each stage lock, it prompts the user to confirm no peer session is active before removing that lock. User confirmation is the verification mechanism for clearing stage locks during cancel. After stage-lock cleanup, the coordinator acquires `state/locks/run.lock`, writes or updates `run.md` with `Status: canceled`, records the reason, removes `state/locks/run.lock`, and stops. Cancel does not delete artifacts.
+
+The coordinator may also write `state/canceled.done` for external waiters in a future protocol version. This version does not require a cancel sentinel.
+
+## Validator
+
+Use `scripts/ccc-validate.sh <output_folder>` to mechanically validate `run.md`, artifact headings, required sections, verdict lines, baseline keys, and `.done` references for a CCC run.
 
 ## Final Output
 

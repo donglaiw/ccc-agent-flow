@@ -49,6 +49,12 @@ Exit codes:
 
 See [examples/runs/hello-world](examples/runs/hello-world) for a complete small run with plan, review, code, follow-up review, state sentinels, and `run.md`.
 
+Validate a run folder with:
+
+```text
+scripts/ccc-validate.sh examples/runs/hello-world
+```
+
 ## Skills
 
 Use these skills:
