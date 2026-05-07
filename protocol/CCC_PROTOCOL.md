@@ -40,6 +40,8 @@ code_vN          a1
 review_vN        a2
 ```
 
+Before acquiring any stage lock, the coordinator must derive the expected next stage and expected role from `.done` files and artifact verdicts. If the invoked role is not the expected role, it must stop before writing anything and report the expected role and waiting `.done` file.
+
 ## Rounds
 
 CCC uses zero-based versions. The two numeric arguments are maximum version indexes, equivalent to the number of allowed revisions after the initial `v0`.
@@ -63,43 +65,94 @@ The coordinator creates the run folder if needed:
   run.md
   artifacts/
   state/
+    locks/
 ```
 
 The run folder has no CCC-managed `logs/` or `context/` directories.
 
 ## Run Metadata
 
-When starting a new run, `a1` writes `<output_folder>/task.md` and `<output_folder>/run.md`.
+When starting a new run, `a1` writes `<output_folder>/task.md`, captures the run baseline files, and initializes `<output_folder>/run.md`.
 
 `run.md` must include:
 
 ```text
 # CCC Run
-## Role
+protocol_version: 1
+
+## Description
+## Roles
 ## Rounds
 ## Task Summary
 ## Git Baseline
-## Current Workflow State
+## Workflow State
 ## Status
 ```
 
-`Git Baseline` records the review base before code changes:
+`## Description` is free-form text for humans.
+
+`## Roles` is an enumeration, not a single current role:
 
 ```text
-run_start_ref: <git sha from `git rev-parse --verify HEAD`, or none>
-run_start_status: <summary of `git status --short`>
+a1: <tool/session/person>
+a2: <tool/session/person>
+```
+
+`## Rounds` uses machine-readable fields:
+
+```text
+plan_rounds: <N>
+revision_rounds: <M>
+```
+
+`## Git Baseline` records the review base before code changes:
+
+```text
+run_start_ref: <git sha or 4b825dc642cb6eb9a060e54bf8d69288fbee4904>
+run_start_ref_kind: head | empty_tree
 run_start_status_file: state/run_start.status
 run_start_unstaged_diff: state/run_start.diff
 run_start_staged_diff: state/run_start_cached.diff
 ```
 
-The coordinator writes those `state/run_start.*` files at run start. If the repository is dirty at run start, reviewers must use those baseline files to distinguish pre-existing changes from CCC changes.
+The coordinator writes those `state/run_start.*` files at run start. `state/run_start.status` is canonical for run-start status; do not duplicate that status inline in `run.md`.
+
+For normal repositories, `run_start_ref` is the output of `git rev-parse --verify HEAD` and `run_start_ref_kind` is `head`.
+
+For fresh repositories with no commits, `run_start_ref` is the Git empty-tree SHA `4b825dc642cb6eb9a060e54bf8d69288fbee4904` and `run_start_ref_kind` is `empty_tree`.
+
+If `run_start_ref` is neither a valid git ref nor the empty-tree SHA, code review must use `VERDICT: BLOCKER` unless the user provides another explicit diff base.
+
+`## Workflow State` is machine-readable. Do not rely on prose parsing:
+
+```text
+current_stage: <stage|none>
+expected_role: <a1|a2|none>
+latest_artifact: <artifact path|none>
+latest_verdict: <APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER|none>
+next_waiting_for: <state file|complete|blocked|max-rounds-reached|canceled>
+```
+
+`## Status` must contain exactly one of:
+
+```text
+active
+waiting
+complete
+blocked
+max-rounds-reached
+canceled
+```
+
+Existing runs with a different `protocol_version` must stop before writing and report the mismatch.
+
+All `run.md` writes use the atomic metadata-write procedure in `Locking and Atomic Writes`.
 
 ## Git Review Baseline
 
 `ccc-code-review` must inspect the actual repository, not only `code_vN.md`.
 
-If `run_start_ref` is a valid git ref, use it as the baseline:
+When `run_start_ref_kind` is `head`, use `run_start_ref` as the baseline:
 
 ```text
 git status --short
@@ -109,13 +162,23 @@ git diff --cached
 git diff
 ```
 
+When `run_start_ref_kind` is `empty_tree`, compare the empty tree to `HEAD` without triple-dot merge-base syntax:
+
+```text
+git status --short
+git diff --stat 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
+git diff 4b825dc642cb6eb9a060e54bf8d69288fbee4904 HEAD
+git diff --cached
+git diff
+```
+
 This keeps committed mid-cycle changes reviewable. `git diff --cached` and `git diff` catch staged and unstaged changes that are not in `HEAD`.
 
 If the run started dirty, compare current status and diffs against `state/run_start.status`, `state/run_start.diff`, and `state/run_start_cached.diff` before assigning findings to the CCC run.
 
-If `run_start_ref` is `none` or invalid, the review verdict must be `VERDICT: BLOCKER` unless the user provides another explicit diff base.
-
 Each `code_vN.md` must include the run baseline and current `HEAD` under `## Git Baseline`.
+
+Each `review_vN.md` must include the `run_start_ref` from `run.md` under `## Diff Baseline`. Validation must confirm the Diff Baseline SHA equals `run_start_ref`.
 
 ## Verdicts
 
@@ -200,7 +263,7 @@ Max code version reached; latest artifact is code_vN.md and is not approved.
 
 ## Artifact Contracts
 
-`plan_vN.md`:
+`plan_vN.md` required sections:
 
 ```text
 # Plan vN
@@ -213,7 +276,11 @@ Max code version reached; latest artifact is code_vN.md and is not approved.
 ## Changes Since Previous Plan Version
 ```
 
-`plan_vN_review.md`:
+`plan_v0.md` must write `Initial plan.` in `Changes Since Previous Plan Version`.
+
+`plan_v1+` must summarize what changed in response to `plan_v{N-1}_review.md`.
+
+`plan_vN_review.md` required sections:
 
 ```text
 # Plan vN Review
@@ -224,7 +291,7 @@ Max code version reached; latest artifact is code_vN.md and is not approved.
 One protocol-approved verdict line.
 ```
 
-`code_vN.md`:
+`code_vN.md` required sections:
 
 ```text
 # Code vN
@@ -241,11 +308,11 @@ One protocol-approved verdict line.
 ## Changes Since Previous Code Version
 ```
 
-For `code_v0`, `Changes Since Previous Code Version` says `Initial implementation.`
+`code_v0.md` must write `Initial implementation.` in `Changes Since Previous Code Version`.
 
-For `code_v1+`, it summarizes what changed in response to `review_v{N-1}.md`.
+`code_v1+` must summarize what changed in response to `review_v{N-1}.md`.
 
-`review_vN.md`:
+`review_vN.md` required sections:
 
 ```text
 # Review vN
@@ -265,24 +332,55 @@ Before writing `.done`, the coordinator validates:
 ```text
 artifact exists
 artifact is non-empty
-artifact filename version matches the top-level heading version
 expected top-level heading exists exactly once
-required sections exist
+required sections exist exactly as listed in Artifact Contracts
 review artifacts contain exactly one valid whole-line VERDICT
-plan_v1+ and code_v1+ have a non-empty Changes Since section
+plan_v0 and code_v0 have required non-empty Changes Since text
+plan_v1+ and code_v1+ have non-empty Changes Since sections
+review_vN Diff Baseline SHA equals run_start_ref from run.md
+```
+
+Filename-to-heading validation is exact:
+
+```text
+plan_v(\d+)\.md          -> # Plan v\1
+plan_v(\d+)_review\.md   -> # Plan v\1 Review
+code_v(\d+)\.md          -> # Code v\1
+review_v(\d+)\.md        -> # Review v\1
 ```
 
 ## Locking and Atomic Writes
 
-Before performing a stage, the coordinator creates a stage lock with an atomic `mkdir`:
+Before performing a stage, the coordinator derives the expected next stage and expected role. It must reject stale-role invocations before attempting any lock.
+
+Stage lock acquisition is the atomic test-and-set operation:
 
 ```text
-<output_folder>/state/locks/<stage>.lock/
+mkdir <output_folder>/state/locks/<stage>.lock
 ```
 
-If the lock already exists and there is no corresponding `.done` file, stop and report the lock path.
+If `mkdir` succeeds, this session owns the stage lock. If `mkdir` fails and there is no corresponding `.done` file, stop and report the lock path.
 
 Write artifacts and done files through a temporary file in the same directory, validate the temporary artifact, then rename it into place.
+
+After the corresponding `.done` file is successfully written and synced, remove the stage lock directory:
+
+```text
+rmdir <output_folder>/state/locks/<stage>.lock
+```
+
+If a session crashes and leaves a lock, recovery is manual: verify no peer session is still working on that stage, verify there is no corresponding `.done` file, then remove the stale lock with `rmdir <output_folder>/state/locks/<stage>.lock`.
+
+`run.md` writes use a separate metadata lock:
+
+```text
+mkdir <output_folder>/state/locks/run.lock
+write <output_folder>/run.md.tmp
+rename run.md.tmp to run.md
+rmdir <output_folder>/state/locks/run.lock
+```
+
+If `run.lock` already exists, stop and report it unless the user confirms stale-lock recovery.
 
 Only the `ccc` coordinator skill writes `.done` files. Individual stage skills must not write `.done`.
 
@@ -322,7 +420,7 @@ To abandon a run, use:
 /ccc cancel <output_folder> "<reason>"
 ```
 
-The coordinator writes or updates `run.md` with `Status: canceled`, records the reason, and stops. It does not delete artifacts.
+The coordinator acquires `state/locks/run.lock`, writes or updates `run.md` with `Status: canceled`, records the reason, removes any stage locks in `state/locks/*.lock` after verifying no peer session is active, removes `state/locks/run.lock` last, and stops. It does not delete artifacts.
 
 ## Final Output
 

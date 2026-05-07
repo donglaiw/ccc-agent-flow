@@ -1,8 +1,14 @@
 # CCC Run
+protocol_version: 1
 
-## Role
+## Description
 
-Example run showing both roles.
+Example run showing a small CCC flow with both roles.
+
+## Roles
+
+a1: example-codex-session
+a2: example-review-session
 
 ## Rounds
 
@@ -15,15 +21,19 @@ Add and verify a small `hello` command.
 
 ## Git Baseline
 
-run_start_ref: 0123456789abcdef0123456789abcdef01234567
-run_start_status: clean
+run_start_ref: 81e5af01a21287343e988d57809bb371e3ad0419
+run_start_ref_kind: head
 run_start_status_file: state/run_start.status
 run_start_unstaged_diff: state/run_start.diff
 run_start_staged_diff: state/run_start_cached.diff
 
-## Current Workflow State
+## Workflow State
 
-review_v1 approved with minor comments.
+current_stage: review_v1
+expected_role: none
+latest_artifact: artifacts/review_v1.md
+latest_verdict: APPROVE_WITH_MINOR_COMMENTS
+next_waiting_for: complete
 
 ## Status
 

@@ -6,7 +6,9 @@ The implementation summary covers the function behavior, but the test should exp
 
 ## Diff Baseline
 
-Compared current work against `0123456789abcdef0123456789abcdef01234567`.
+run_start_ref: 81e5af01a21287343e988d57809bb371e3ad0419
+
+Compared current work against `81e5af01a21287343e988d57809bb371e3ad0419`.
 
 ## Findings
 

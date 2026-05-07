@@ -20,8 +20,8 @@ The command implementation is unchanged; verification now exercises the user-fac
 
 ## Git Baseline
 
-run_start_ref: 0123456789abcdef0123456789abcdef01234567
-current_head: 2222222222222222222222222222222222222222
+run_start_ref: 81e5af01a21287343e988d57809bb371e3ad0419
+current_head: 81e5af01a21287343e988d57809bb371e3ad0419
 
 ## Verification
 

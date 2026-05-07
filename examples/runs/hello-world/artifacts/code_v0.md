@@ -21,8 +21,8 @@ Added a module entry point that prints `hello, world`.
 
 ## Git Baseline
 
-run_start_ref: 0123456789abcdef0123456789abcdef01234567
-current_head: 1111111111111111111111111111111111111111
+run_start_ref: 81e5af01a21287343e988d57809bb371e3ad0419
+current_head: 81e5af01a21287343e988d57809bb371e3ad0419
 
 ## Verification
 
