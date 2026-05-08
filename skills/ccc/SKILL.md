@@ -10,7 +10,7 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 
 ## Coordinator Checklist
 
-1. Parse the requested CCC action: `run`, `resume`, or `cancel`.
+1. Parse the requested CCC action: `run`, `resume`, or `cancel`, plus optional mode `auto` or `manual`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
 4. For a new `run`, confirm `codex login status`, `codex exec --help`, and `codex exec review --help` exit successfully, or initialize the run as blocked.
@@ -18,7 +18,7 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 6. Determine the next stage from `.done` files and artifact verdicts.
 7. For driver stages, perform the matching stage skill directly.
 8. For reviewer stages, run the matching non-interactive Codex CLI command and capture its final message in `state/<review-stage>.codex.raw.md`.
-9. Validate the artifact, write the `.done` file, update `run.md`, and continue until complete, blocked, canceled, or max rounds are reached.
+9. Validate the artifact, write the `.done` file, update `run.md`, and continue until complete, blocked, canceled, or max rounds are reached. In `manual` mode, stop after one completed stage.
 
 ## Codex CLI Review
 

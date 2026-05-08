@@ -24,6 +24,13 @@ Run CCC from Claude Code:
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
 ```
 
+Default mode is fully automatic. To stop after each completed CCC stage, add `manual`:
+
+```text
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 manual
+/ccc resume .ccc/runs/auth-fix manual
+```
+
 Resume an interrupted run:
 
 ```text
@@ -42,7 +49,7 @@ The canonical workflow, artifact names, verdicts, validation rules, and round se
 
 CCC runs sequentially in one Claude Code session.
 
-Claude Code writes plan and code artifacts. For review artifacts, the coordinator runs a non-interactive `codex` command, captures the final Codex message, writes the required Markdown artifact, validates it, and continues. There is no polling loop and no manual review trigger.
+Claude Code writes plan and code artifacts. For review artifacts, the coordinator runs a non-interactive `codex` command, captures the final Codex message, writes the required Markdown artifact, validates it, and continues. There is no polling loop and no manual Codex trigger.
 
 Raw Codex output is kept beside the `.done` files:
 
@@ -57,7 +64,7 @@ Typical review calls:
 
 ```text
 codex exec --sandbox read-only --output-last-message .ccc/runs/auth-fix/state/plan_v0_review.codex.raw.md -
-codex exec review --base <run_start_ref> --uncommitted --output-last-message .ccc/runs/auth-fix/state/review_v0.codex.raw.md -
+codex exec review --uncommitted --output-last-message .ccc/runs/auth-fix/state/review_v0.codex.raw.md -
 ```
 
 ## Example

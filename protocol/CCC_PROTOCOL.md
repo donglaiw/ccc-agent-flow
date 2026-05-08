@@ -20,19 +20,26 @@ codex exec review --help
 
 CCC uses non-interactive Codex CLI calls. It must not ask the user to run `/codex:` slash commands.
 
-This protocol targets `codex-cli 0.129.0` and requires `codex login status`, `codex exec`, `codex exec review`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
+This protocol targets `codex-cli 0.128.0` or newer and requires `codex login status`, `codex exec`, `codex exec review`, `--uncommitted`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
 
 On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator should run `codex login status` and the help commands above. Use exit codes, not output text, as the contract: a non-zero `codex login status` means unauthenticated. If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 ## Syntax
 
 ```text
-/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds]
-/ccc resume <output_folder>
+/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds] [auto|manual]
+/ccc resume <output_folder> [auto|manual]
 /ccc cancel <output_folder> "<reason>"
 ```
 
-If rounds are omitted, use `2,2`.
+If rounds are omitted, use `2,2`. If mode is omitted, use `auto`. If both optional arguments are present, rounds come before mode; if only one optional argument is present, parse `auto` or `manual` as mode and `N,M` as rounds.
+
+Mode behavior:
+
+```text
+auto    run stages until complete, blocked, canceled, or max-rounds-reached
+manual  complete one stage, write its artifact and .done file, update run.md, then stop
+```
 
 ## Roles
 
@@ -219,17 +226,17 @@ The coordinator saves the unnormalized Codex output for each plan review at:
 state/plan_vN_review.codex.raw.md
 ```
 
-Code review uses `codex exec review` against the captured baseline:
+Code review uses `codex exec review --uncommitted` when `HEAD` has not moved since run start:
 
 ```text
-codex exec review --base <run_start_ref> --uncommitted --output-last-message <output_folder>/state/review_vN.codex.raw.md -
+codex exec review --uncommitted --output-last-message <output_folder>/state/review_vN.codex.raw.md -
 ```
 
-The stdin prompt must ask Codex to review the actual repository changes against `run_start_ref`, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
+Before using this command, confirm `run_start_ref_kind: head` and `git rev-parse HEAD` equals `run_start_ref`. In that normal case, `--uncommitted` is exhaustive because the run baseline is the current `HEAD`; it covers staged, unstaged, and untracked working-tree changes.
+
+The stdin prompt must ask Codex to review the actual repository changes, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
 
 `codex exec review` does not accept `--sandbox`; CCC relies on the dedicated review subcommand and must not pass `--dangerously-bypass-approvals-and-sandbox`. To guard tracked and staged repository content, capture `git diff` and `git diff --cached` immediately before and after the Codex review command. If the before/after outputs differ, stop with `Status: blocked`, report the mutation diff to the user, and require the user to restore or stash those changes before resuming.
-
-With `--base <run_start_ref> --uncommitted`, CCC expects the review to cover both committed changes relative to `run_start_ref` and staged, unstaged, and untracked working-tree changes. The prompt must state that expectation explicitly.
 
 Use this prompt shape:
 
@@ -240,7 +247,7 @@ For review_v1+, also read <output_folder>/artifacts/code_v{N-1}.md and <output_f
 
 Review the actual repository changes, not only code_vN.md.
 Baseline: <run_start_ref>
-Cover committed changes relative to the baseline and staged, unstaged, and untracked working-tree changes.
+For the normal path, HEAD equals the baseline, so review staged, unstaged, and untracked working-tree changes.
 Do not edit files.
 Return:
 ## Summary
@@ -253,7 +260,7 @@ READY: yes|no
 
 The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
 
-If `run_start_ref_kind` is `empty_tree`, use `codex exec --sandbox read-only` instead because `codex exec review --base` expects a normal git base. Include the empty-tree diff commands from `Git Review Baseline` in the prompt:
+If `run_start_ref_kind` is `empty_tree` or `HEAD` no longer equals `run_start_ref`, use `codex exec --sandbox read-only` instead because `codex exec review --uncommitted` only covers changes against current `HEAD`. Include the relevant diff commands from `Git Review Baseline` in the prompt:
 
 ```text
 codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.codex.raw.md -
@@ -328,6 +335,10 @@ Do not use substring matching.
 
 `BLOCKER` stops the workflow for user direction.
 
+Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge.
+
+When no further plan or code version is allowed, the coordinator may override unresolved minor-only findings to `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue. If unresolved findings are major, stop with `Status: blocked` and ask for human direction instead of silently marking the run complete.
+
 ## Planning Transitions
 
 If no plan exists:
@@ -349,6 +360,8 @@ coordinator writes state/plan_vN_review.done
 If `plan_vN_review.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, planning is approved and the driver may write `artifacts/code_v0.md`.
 
 If `plan_vN_review.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
+
+If `N` already equals `plan_rounds`, unresolved minor-only issues may be treated as `VERDICT: APPROVE_WITH_MINOR_COMMENTS`. Major unresolved issues stop the run for human direction.
 
 If `plan_vN_review.md` says `VERDICT: BLOCKER`, stop.
 
@@ -379,6 +392,8 @@ coordinator writes state/review_vN.done
 If `review_vN.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, the workflow is complete.
 
 If `review_vN.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
+
+If `N` already equals `revision_rounds`, unresolved minor-only issues may be treated as `VERDICT: APPROVE_WITH_MINOR_COMMENTS`. Major unresolved issues stop the run for human direction.
 
 If `review_vN.md` says `VERDICT: BLOCKER`, stop unless the user explicitly directs the driver to continue with a clear fix.
 

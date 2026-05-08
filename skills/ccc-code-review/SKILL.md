@@ -32,8 +32,8 @@ Do not write `.done`.
 
 ## Rules
 
-* Run `codex exec review --base <run_start_ref> --uncommitted --output-last-message <RUN>/state/review_vN.codex.raw.md -` from the repository root.
-* For empty-tree baselines, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's empty-tree diff commands in the prompt.
+* If `HEAD` equals `run_start_ref`, run `codex exec review --uncommitted --output-last-message <RUN>/state/review_vN.codex.raw.md -` from the repository root.
+* If `HEAD` differs from `run_start_ref` or the baseline is empty-tree, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's diff commands in the prompt.
 * Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * Do not pass `--dangerously-bypass-approvals-and-sandbox`.
 * Capture `git diff` and `git diff --cached` before and after `codex exec review`; stop as blocked if they differ.
