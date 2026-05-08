@@ -34,6 +34,8 @@ On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator sh
 
 If rounds are omitted, use `2,2`. If mode is omitted, use `auto`. Optional arguments may appear in either order: parse `auto` or `manual` as mode and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
 
+On parse errors, print the error and stop without creating or modifying the run folder.
+
 Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `auto` unless `manual` is passed again.
 
 Mode behavior:
@@ -239,7 +241,7 @@ Code review uses `codex exec review --uncommitted` when `HEAD` has not moved sin
 codex exec review --uncommitted --output-last-message <output_folder>/state/review_vN.codex.raw.md -
 ```
 
-Before using this command, confirm `run_start_ref_kind: head` and `git rev-parse HEAD` equals `run_start_ref`. In that normal case, `--uncommitted` is exhaustive because the run baseline is the current `HEAD`; it covers staged, unstaged, and untracked working-tree changes. If `HEAD` has moved, stop with `Status: blocked`; the run has a mid-run commit or external repository mutation and no longer satisfies the CCC review baseline.
+Before using this command, confirm `run_start_ref_kind: head` and `git rev-parse HEAD` equals `run_start_ref`. In that normal case, `--uncommitted` is exhaustive because the run baseline is the current `HEAD`; it covers staged, unstaged, and untracked working-tree changes. If `HEAD` has moved, stop with `Status: blocked`; the run has a mid-run commit or external repository mutation and no longer satisfies the CCC review baseline. To recover, restore `HEAD` to `run_start_ref` and resume, or cancel the run and start a new one.
 
 The stdin prompt must ask Codex to review the actual repository changes, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
 
@@ -364,7 +366,7 @@ Do not use substring matching.
 
 `BLOCKER` stops the workflow for user direction.
 
-Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge. Findings must be tagged `[minor]` or `[major]` in raw Codex review output. If severity is ambiguous, treat it as major.
+Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge. Findings must be tagged `[minor]` or `[major]` in raw Codex review output, and the coordinator must preserve those tags in the normalized artifact's `## Findings` body. If severity is ambiguous, treat it as major.
 
 When no further plan or code version is allowed, the coordinator may override unresolved minor-only findings to `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue. If unresolved findings are major, stop with `Status: blocked` and ask for human direction instead of silently marking the run complete.
 

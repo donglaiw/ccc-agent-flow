@@ -31,7 +31,9 @@ Default mode is fully automatic. To stop after each completed CCC stage, add `ma
 /ccc resume .ccc/runs/auth-fix manual
 ```
 
-Mode is not persisted; `resume` defaults to `auto` unless `manual` is passed again. Do not commit during an active CCC run; commit after the run reaches a terminal state.
+Mode is not persisted; `resume` defaults to `auto` unless `manual` is passed again.
+
+Do not commit during an active CCC run; commit after the run reaches a terminal state.
 
 Resume an interrupted run:
 
