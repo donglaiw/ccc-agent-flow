@@ -2,7 +2,7 @@
 
 CCC is a Claude Code first workflow that uses the [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) for synchronous review passes.
 
-The old two-session coordinator has been preserved on the pushed `two-session` branch. `main` now defaults to one Claude Code coordinator session: Claude Code plans and implements, then uses foreground Codex plugin slash commands for review stages.
+Claude Code plans and implements, then uses foreground Codex plugin slash commands for review stages in the same session.
 
 ## Usage
 
@@ -15,7 +15,7 @@ Install and set up the Codex plugin inside Claude Code:
 /codex:setup
 ```
 
-CCC v2 targets the `openai/codex-plugin-cc` `v1.0.4` command surface. If your installed plugin differs, verify `/codex:setup`, `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` before starting a run. If compatibility is unclear, CCC should block before writing stage artifacts.
+The canonical protocol pins the supported `openai/codex-plugin-cc` command surface. If compatibility is unclear, CCC should block before writing stage artifacts.
 
 Run CCC from Claude Code:
 
@@ -41,7 +41,7 @@ The canonical workflow, artifact names, verdicts, validation rules, and round se
 
 CCC runs sequentially in one Claude Code session.
 
-Claude Code writes plan and code artifacts. For review artifacts, the coordinator prints an exact foreground `/codex:... --wait` command, the user runs that slash command in Claude Code, then the coordinator captures the raw result, writes the required Markdown artifact, validates it, and continues. There is no peer-session wait loop and no polling inside the model.
+Claude Code writes plan and code artifacts. For review artifacts, the coordinator prints an exact foreground `/codex:... --wait` command, the user runs that slash command in Claude Code, then the coordinator captures the raw result, writes the required Markdown artifact, validates it, and continues. There is no polling loop.
 
 Raw Codex output is kept beside the `.done` files:
 

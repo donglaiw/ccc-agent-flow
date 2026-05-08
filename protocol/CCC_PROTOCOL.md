@@ -4,8 +4,6 @@ This file is the canonical CCC workflow specification. README files and skills s
 
 CCC is a single-session Claude Code coordinator workflow. Claude Code owns the run, writes plan/code artifacts, and invokes the Codex plugin for Claude Code synchronously for review stages.
 
-The two-session lock-and-wait protocol is preserved on the `two-session` branch.
-
 Do not use `.ccc/current_run`; the output folder is always explicit.
 
 ## Requirements
@@ -23,7 +21,7 @@ The plugin provides `/codex:review`, `/codex:adversarial-review`, `/codex:rescue
 
 This protocol targets the command surface documented by [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) `v1.0.4`. If the installed plugin version differs, run `/codex:setup` and verify that `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` are still supported before starting a CCC run.
 
-On `/ccc run`, the coordinator should ask the user to confirm that the installed Codex plugin supports the required `--wait` and `--base` flags, unless compatibility was already confirmed in the current session. If compatibility cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
+On `/ccc run`, if plugin compatibility is unclear, the coordinator should ask the user to confirm that the installed Codex plugin supports the required `--wait` and `--base` flags. If compatibility cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 `/codex:rescue` is not part of the normal CCC transition graph. Use it only when a plugin invocation fails or when the user explicitly asks for a separate Codex investigation. Rescue output cannot replace a CCC review artifact unless the coordinator captures it as raw transcript and normalizes it into the required review schema.
 
@@ -55,7 +53,7 @@ review_vN        reviewer, invoked by driver
 
 The coordinator runs these stages sequentially in one Claude Code session. It may stop for user direction on `BLOCKER`, invalid plugin output, failed validation, or max-round exhaustion.
 
-Protocol v2 has no multi-session safety layer. Exactly one Claude Code coordinator session may be active for a given `<output_folder>` at a time. Starting a second coordinator on the same run can race artifact, `.done`, and `run.md` writes.
+CCC has no multi-session safety layer. Exactly one Claude Code coordinator session may be active for a given `<output_folder>` at a time. Starting a second coordinator on the same run can race artifact, `.done`, and `run.md` writes.
 
 ## Rounds
 
@@ -82,11 +80,7 @@ The coordinator creates the run folder if needed:
   state/
 ```
 
-The run folder has no CCC-managed `logs/`, `context/`, or `locks/` directories in the default Claude Code workflow.
-
-Protocol v2 invariant: `<output_folder>/state/locks/` must not exist. A `state/locks/` directory means the folder belongs to the old two-session protocol; use the `two-session` branch or recreate the run as protocol v2.
-
-## Run Metadata
+## Run File
 
 When starting a new run, the coordinator writes `<output_folder>/task.md`, captures the run baseline files, and initializes `<output_folder>/run.md`.
 
@@ -95,9 +89,7 @@ When starting a new run, the coordinator writes `<output_folder>/task.md`, captu
 ```text
 # CCC Run
 
-## Metadata
 ## Description
-## Roles
 ## Rounds
 ## Task Summary
 ## Git Baseline
@@ -105,21 +97,7 @@ When starting a new run, the coordinator writes `<output_folder>/task.md`, captu
 ## Status
 ```
 
-`## Metadata` uses machine-readable fields:
-
-```text
-protocol_version: 2
-mode: claude-code-codex-plugin
-```
-
 `## Description` is free-form text for humans.
-
-`## Roles` is an enumeration:
-
-```text
-driver: claude-code
-reviewer: codex-plugin-cc
-```
 
 `## Rounds` uses machine-readable fields:
 
@@ -156,7 +134,6 @@ If `run_start_ref` is neither a valid git ref nor the empty-tree SHA, code revie
 
 ```text
 current_stage: <stage|none>
-expected_actor: <driver|reviewer|none>
 latest_artifact: <artifact path|none>
 latest_verdict: <APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER|none>
 next_action: <stage|complete|blocked|max-rounds-reached|canceled>
@@ -166,13 +143,10 @@ Field values are constrained:
 
 ```text
 current_stage: none | plan_vN | plan_vN_review | code_vN | review_vN
-expected_actor: driver | reviewer | none
 latest_artifact: none | artifacts/plan_vN.md | artifacts/plan_vN_review.md | artifacts/code_vN.md | artifacts/review_vN.md
 latest_verdict: APPROVE | APPROVE_WITH_MINOR_COMMENTS | NEEDS_CHANGES | BLOCKER | none
 next_action: plan_vN | plan_vN_review | code_vN | review_vN | complete | blocked | max-rounds-reached | canceled
 ```
-
-`expected_actor: none` is only valid when status is `complete`, `canceled`, `blocked`, or `max-rounds-reached`.
 
 `## Status` must contain exactly one of:
 
@@ -193,8 +167,6 @@ blocked   the workflow has a BLOCKER verdict, invalid plugin output, failed vali
 max-rounds-reached  the workflow exhausted the configured max version without approval
 canceled  the user canceled the run
 ```
-
-Existing runs with a different `protocol_version` must stop before writing and report the mismatch. Two-session protocol v1 runs should be resumed from the `two-session` branch.
 
 All `run.md` writes use a temporary file in the same directory, then an atomic rename.
 
@@ -508,7 +480,6 @@ Done file content:
 ```text
 ---
 stage: <stage>
-actor: <driver|reviewer>
 artifact: artifacts/<artifact>.md
 status: complete
 ---
@@ -543,7 +514,6 @@ Always end with:
 
 ```text
 CCC run: <output_folder>
-Mode: claude-code-codex-plugin
 Stage completed: <stage|none>
 Next action: <stage|complete|blocked|max-rounds-reached|canceled>
 ```

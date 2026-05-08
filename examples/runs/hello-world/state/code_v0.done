@@ -1,6 +1,5 @@
 ---
 stage: code_v0
-actor: driver
 artifact: artifacts/code_v0.md
 status: complete
 ---

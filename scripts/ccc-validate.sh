@@ -44,7 +44,6 @@ CONTRACTS = {
 }
 
 STATUS_VALUES = {"active", "complete", "blocked", "max-rounds-reached", "canceled"}
-TERMINAL_STATUS = {"complete", "blocked", "max-rounds-reached", "canceled"}
 VERDICT_VALUES = {"APPROVE", "APPROVE_WITH_MINOR_COMMENTS", "NEEDS_CHANGES", "BLOCKER", "none"}
 TERMINAL_ACTIONS = {"complete", "blocked", "max-rounds-reached", "canceled"}
 
@@ -91,18 +90,6 @@ def non_empty_section(path: Path, text: str, name: str) -> str:
     return body
 
 
-def stage_actor(stage: str) -> str:
-    if stage.startswith("plan_v") and not stage.endswith("_review"):
-        return "driver"
-    if stage.startswith("code_v"):
-        return "driver"
-    if stage.startswith("plan_v") and stage.endswith("_review"):
-        return "reviewer"
-    if stage.startswith("review_v"):
-        return "reviewer"
-    return ""
-
-
 def parse_run_md() -> tuple[str, str, dict]:
     run_md = RUN / "run.md"
     text = read(run_md)
@@ -115,20 +102,8 @@ def parse_run_md() -> tuple[str, str, dict]:
     require_sections(
         run_md,
         text,
-        ["Metadata", "Description", "Roles", "Rounds", "Task Summary", "Git Baseline", "Workflow State", "Status"],
+        ["Description", "Rounds", "Task Summary", "Git Baseline", "Workflow State", "Status"],
     )
-
-    metadata = key_values(section(text, "Metadata"))
-    if metadata.get("protocol_version") != "2":
-        err("run.md: Metadata must contain protocol_version: 2")
-    if metadata.get("mode") != "claude-code-codex-plugin":
-        err("run.md: Metadata must contain mode: claude-code-codex-plugin")
-
-    roles = key_values(section(text, "Roles"))
-    if roles.get("driver") != "claude-code":
-        err("run.md: Roles must contain driver: claude-code")
-    if roles.get("reviewer") != "codex-plugin-cc":
-        err("run.md: Roles must contain reviewer: codex-plugin-cc")
 
     rounds = key_values(section(text, "Rounds"))
     for key in ("plan_rounds", "revision_rounds"):
@@ -159,10 +134,6 @@ def parse_run_md() -> tuple[str, str, dict]:
     if current_stage != "none" and not (current_stage and STAGE_RE.fullmatch(current_stage)):
         err("run.md: Workflow State current_stage must be none or a valid stage")
 
-    expected_actor = workflow.get("expected_actor")
-    if expected_actor not in {"driver", "reviewer", "none"}:
-        err("run.md: Workflow State expected_actor must be driver, reviewer, or none")
-
     latest_verdict = workflow.get("latest_verdict")
     if latest_verdict not in VERDICT_VALUES:
         err("run.md: Workflow State latest_verdict has invalid value")
@@ -181,12 +152,6 @@ def parse_run_md() -> tuple[str, str, dict]:
         status = ""
     else:
         status = status_lines[0]
-
-    if expected_actor == "none" and status and status not in TERMINAL_STATUS:
-        err("run.md: expected_actor none is only valid for terminal statuses")
-
-    if status in TERMINAL_STATUS and expected_actor and expected_actor != "none":
-        err("run.md: terminal statuses require expected_actor: none")
 
     expected_actions = {
         "complete": "complete",
@@ -276,15 +241,13 @@ def validate_done_file(path: Path) -> None:
     values = key_values(text)
     stage = values.get("stage")
     artifact = values.get("artifact")
-    actor = values.get("actor")
 
     if not stage:
         err(f"{path}: missing stage")
     elif path.stem != stage:
         err(f"{path}: done filename must match stage")
-
-    if stage and actor != stage_actor(stage):
-        err(f"{path}: actor must be {stage_actor(stage)}")
+    elif not STAGE_RE.fullmatch(stage):
+        err(f"{path}: invalid stage")
 
     if values.get("status") != "complete":
         err(f"{path}: status must be complete")
@@ -326,12 +289,6 @@ def validate_artifact_done_pairs(artifact_paths: list[Path]) -> None:
             err(f"{path}: missing matching done file {done_path}")
 
 
-def validate_no_locks_dir() -> None:
-    locks = RUN / "state" / "locks"
-    if locks.exists():
-        err(f"{locks}: locks directory belongs to the two-session protocol, not protocol v2; use the two-session branch or recreate the run")
-
-
 def main() -> int:
     if not RUN.exists() or not RUN.is_dir():
         err(f"run folder does not exist: {RUN}")
@@ -354,7 +311,6 @@ def main() -> int:
     else:
         for path in sorted(state.glob("*.done")):
             validate_done_file(path)
-        validate_no_locks_dir()
 
     if errors:
         for message in errors:

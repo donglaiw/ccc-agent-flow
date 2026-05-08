@@ -1,6 +1,5 @@
 ---
 stage: review_v1
-actor: reviewer
 artifact: artifacts/review_v1.md
 status: complete
 ---
