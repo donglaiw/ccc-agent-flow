@@ -34,10 +34,13 @@ Do not write `.done`.
 
 * Run `codex exec review --base <run_start_ref> --uncommitted --output-last-message <RUN>/state/review_vN.codex.raw.md -` from the repository root.
 * For empty-tree baselines, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's empty-tree diff commands in the prompt.
+* Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
+* Do not pass `--dangerously-bypass-approvals-and-sandbox`.
+* Capture `git status --short`, `git diff`, and `git diff --cached` before and after `codex exec review`; stop as blocked if they differ.
 * Inspect the actual git diff using the `run_start_ref` from `run.md`.
 * Do not trust `code_vN.md` alone.
 * For `review_v1+`, focus on whether prior findings were fixed and whether new issues were introduced.
 * Save the raw Codex output to `state/review_vN.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
-* If Codex output does not clearly support a verdict, ask for clarification or stop as blocked.
+* If Codex output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.

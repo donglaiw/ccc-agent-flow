@@ -10,6 +10,7 @@ Install and authenticate the Codex CLI:
 
 ```text
 codex login
+codex login status
 codex --version
 codex exec --help
 codex exec review --help

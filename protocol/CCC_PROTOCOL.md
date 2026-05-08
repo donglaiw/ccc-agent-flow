@@ -12,6 +12,7 @@ Use this protocol from Claude Code with the Codex CLI installed and authenticate
 
 ```text
 codex login
+codex login status
 codex --version
 codex exec --help
 codex exec review --help
@@ -19,9 +20,9 @@ codex exec review --help
 
 CCC uses non-interactive Codex CLI calls. It must not ask the user to run `/codex:` slash commands.
 
-This protocol targets `codex-cli 0.129.0` and requires `codex exec`, `codex exec review`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
+This protocol targets `codex-cli 0.129.0` and requires `codex login status`, `codex exec`, `codex exec review`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
 
-On `/ccc run`, if CLI compatibility is unclear, the coordinator should run the help commands above. If compatibility cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
+On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator should run `codex login status` and the help commands above. If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 ## Syntax
 
@@ -181,6 +182,8 @@ Reviewer stages run Codex from the shell. The coordinator provides the review pr
 4. Normalize that raw message into the CCC review artifact.
 ```
 
+All Codex commands must run with `cwd` set to the repository root. Output paths may be repository-relative or absolute, but they must resolve to the active run folder.
+
 If the Codex command exits non-zero, the raw transcript is missing, or the raw transcript is empty, stop with `Status: blocked`.
 
 Plan review uses `codex exec` in read-only mode:
@@ -190,6 +193,23 @@ codex exec --sandbox read-only --output-last-message <output_folder>/state/plan_
 ```
 
 The stdin prompt must ask Codex to review `<output_folder>/artifacts/plan_vN.md` against `<output_folder>/task.md`, avoid code edits, and return findings, questions, and whether the plan appears ready for implementation. For `plan_v1+`, include the previous plan and review in the prompt.
+
+Use this prompt shape:
+
+```text
+You are the CCC plan reviewer for <stage>.
+Read <output_folder>/task.md and <output_folder>/artifacts/plan_vN.md.
+For plan_v1+, also read <output_folder>/artifacts/plan_v{N-1}.md and <output_folder>/artifacts/plan_v{N-1}_review.md.
+
+Do not edit files.
+Review whether the plan is correct, complete, scoped, and ready to implement.
+Return:
+## Summary
+## Findings
+## Questions
+## Readiness
+READY: yes|no
+```
 
 The coordinator saves the unnormalized Codex output for each plan review at:
 
@@ -205,6 +225,30 @@ codex exec review --base <run_start_ref> --uncommitted --output-last-message <ou
 
 The stdin prompt must ask Codex to review the actual repository changes against `run_start_ref`, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
 
+`codex exec review` does not accept `--sandbox`; CCC relies on the dedicated review subcommand and must not pass `--dangerously-bypass-approvals-and-sandbox`. To guard the repository, capture `git status --short`, `git diff`, and `git diff --cached` immediately before and after the Codex review command. If the before/after outputs differ, stop with `Status: blocked` and report that the reviewer mutated repository state.
+
+With `--base <run_start_ref> --uncommitted`, CCC expects the review to cover both committed changes relative to `run_start_ref` and staged, unstaged, and untracked working-tree changes. The prompt must state that expectation explicitly.
+
+Use this prompt shape:
+
+```text
+You are the CCC code reviewer for <stage>.
+Read <output_folder>/task.md, <output_folder>/run.md, and <output_folder>/artifacts/code_vN.md.
+For review_v1+, also read <output_folder>/artifacts/code_v{N-1}.md and <output_folder>/artifacts/review_v{N-1}.md.
+
+Review the actual repository changes, not only code_vN.md.
+Baseline: <run_start_ref>
+Cover committed changes relative to the baseline and staged, unstaged, and untracked working-tree changes.
+Do not edit files.
+Return:
+## Summary
+## Findings
+## Tests to Add
+## Questions
+## Readiness
+READY: yes|no
+```
+
 If `run_start_ref_kind` is `empty_tree`, use `codex exec --sandbox read-only` instead and include the empty-tree diff commands from `Git Review Baseline` in the prompt:
 
 ```text
@@ -212,6 +256,8 @@ codex exec --sandbox read-only --output-last-message <output_folder>/state/revie
 ```
 
 The coordinator must copy or summarize Codex CLI output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If Codex output does not clearly support a protocol verdict, the coordinator asks Codex for clarification with another non-interactive call or stops with `Status: blocked`.
+
+Clarification output must not overwrite the first raw transcript. Append clarification calls to the same `state/<stage>.codex.raw.md` file under a clear separator such as `--- Clarification 1 ---`, then normalize from the combined raw transcript.
 
 The coordinator saves the unnormalized Codex output for each code review at:
 

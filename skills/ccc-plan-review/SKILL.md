@@ -32,10 +32,11 @@ Do not write `.done`.
 ## Rules
 
 * Run `codex exec --sandbox read-only --output-last-message <RUN>/state/plan_vN_review.codex.raw.md -` from the repository root.
+* Use the plan-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * Ask Codex for findings, questions, and whether the plan appears ready for implementation.
 * Do not let Codex edit code during plan review.
 * Save the raw Codex output to `state/plan_vN_review.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
-* If Codex output does not clearly support a verdict, ask for clarification or stop as blocked.
+* If Codex output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
 * Do not write code artifacts.
