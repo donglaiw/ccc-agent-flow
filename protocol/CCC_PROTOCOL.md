@@ -23,6 +23,8 @@ The plugin provides `/codex:review`, `/codex:adversarial-review`, `/codex:rescue
 
 This protocol targets the command surface documented by [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) `v1.0.4`. If the installed plugin version differs, run `/codex:setup` and verify that `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` are still supported before starting a CCC run.
 
+On `/ccc run`, the coordinator should ask the user to confirm that the installed Codex plugin supports the required `--wait` and `--base` flags, unless compatibility was already confirmed in the current session. If compatibility cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
+
 `/codex:rescue` is not part of the normal CCC transition graph. Use it only when a plugin invocation fails or when the user explicitly asks for a separate Codex investigation. Rescue output cannot replace a CCC review artifact unless the coordinator captures it as raw transcript and normalizes it into the required review schema.
 
 ## Syntax
@@ -38,8 +40,8 @@ If rounds are omitted, use `2,2`.
 ## Roles
 
 ```text
-driver    Claude Code; writes task, run, plan, code, state, and done files
-reviewer  Codex plugin for Claude Code; provides review findings and verdicts
+driver    Claude Code; writes task, run, plan, code, state, verdicts, and done files
+reviewer  Codex plugin for Claude Code; provides review findings and review signal
 ```
 
 Stage ownership:
@@ -209,12 +211,14 @@ Claude Code skills cannot assume they can programmatically type slash commands. 
 4. The coordinator saves the raw plugin output before writing the CCC review artifact.
 ```
 
+Assume plugin output is returned inline in the Claude Code conversation. The coordinator copies that inline output into `state/<stage>.codex.raw.md` before writing any normalized CCC review artifact.
+
 If a future Claude Code environment exposes the Codex plugin through callable tools, the coordinator may use those tools directly, but the raw transcript and artifact validation rules stay the same.
 
 Plan review uses the steerable read-only review command:
 
 ```text
-/codex:adversarial-review --wait Review <output_folder>/artifacts/plan_vN.md against <output_folder>/task.md. Do not edit code. Return the CCC plan-review artifact structure and exactly one valid VERDICT line.
+/codex:adversarial-review --wait Review <output_folder>/artifacts/plan_vN.md against <output_folder>/task.md. Do not edit code. Return findings, questions, and whether the plan appears ready for implementation. The CCC coordinator will write the normalized review artifact and verdict.
 ```
 
 For `plan_v1+`, include the previous plan and review in the focus text.
@@ -237,7 +241,7 @@ If extra scrutiny is needed, use:
 /codex:adversarial-review --wait --base <run_start_ref> Focus on the CCC review artifact requirements, prior review findings, and regressions introduced since the baseline.
 ```
 
-The coordinator must copy or summarize Codex plugin output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If plugin output is ambiguous or lacks a valid verdict, the coordinator asks the plugin for clarification or stops with `Status: blocked`.
+The coordinator must copy or summarize Codex plugin output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If plugin output does not clearly support a protocol verdict, the coordinator asks the plugin for clarification or stops with `Status: blocked`.
 
 The coordinator must save the unnormalized plugin output for each code review at:
 
@@ -467,7 +471,7 @@ For every stage, write files in this order:
 7. Update run.md through a same-directory temporary file and atomic rename.
 ```
 
-The `.done` file is the commit point for a stage. A coordinator resuming after a crash must ignore partial `*.tmp` files until a human intentionally repairs or removes them.
+The `.done` file is the commit point for a stage. Step 3 is a model-side validation against the would-be final filenames; `scripts/ccc-validate.sh` is a post-hoc run-folder validator and does not validate temporary paths. A coordinator resuming after a crash must ignore partial `*.tmp` files until a human intentionally repairs or removes them. Repair removes only files the user names; never sweep `state/*.tmp` or `artifacts/*.tmp` automatically.
 
 ## Validation Before .done
 

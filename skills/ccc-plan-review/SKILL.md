@@ -32,10 +32,10 @@ Do not write `.done`.
 ## Rules
 
 * Print the exact `/codex:adversarial-review --wait ...` command for the user to run in Claude Code, unless the environment explicitly exposes the plugin as a callable tool.
-* Ask Codex to review the plan against the task and return the CCC plan-review structure with exactly one valid verdict line.
+* Ask Codex for findings, questions, and whether the plan appears ready for implementation.
 * Do not let Codex edit code during plan review.
 * Save the raw plugin output to `state/plan_vN_review.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
-* If Codex output lacks a clear verdict, ask for clarification or stop as blocked.
+* If Codex output does not clearly support a verdict, ask for clarification or stop as blocked.
 * Do not write code artifacts.

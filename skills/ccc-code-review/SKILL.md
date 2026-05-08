@@ -40,4 +40,4 @@ Do not write `.done`.
 * Save the raw plugin output to `state/review_vN.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
-* If Codex output lacks a clear verdict, ask for clarification or stop as blocked.
+* If Codex output does not clearly support a verdict, ask for clarification or stop as blocked.

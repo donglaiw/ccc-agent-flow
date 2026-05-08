@@ -15,7 +15,7 @@ Install and set up the Codex plugin inside Claude Code:
 /codex:setup
 ```
 
-CCC v2 targets the `openai/codex-plugin-cc` `v1.0.4` command surface. If your installed plugin differs, verify `/codex:setup`, `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` before starting a run.
+CCC v2 targets the `openai/codex-plugin-cc` `v1.0.4` command surface. If your installed plugin differs, verify `/codex:setup`, `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` before starting a run. If compatibility is unclear, CCC should block before writing stage artifacts.
 
 Run CCC from Claude Code:
 
@@ -55,7 +55,7 @@ Only one Claude Code coordinator session should be active for a given output fol
 Typical review calls:
 
 ```text
-/codex:adversarial-review --wait Review .ccc/runs/auth-fix/artifacts/plan_v0.md against .ccc/runs/auth-fix/task.md. Do not edit code. Return the CCC plan-review structure and one valid VERDICT line.
+/codex:adversarial-review --wait Review .ccc/runs/auth-fix/artifacts/plan_v0.md against .ccc/runs/auth-fix/task.md. Do not edit code. Return findings, questions, and whether the plan appears ready for implementation.
 /codex:review --wait --base <run_start_ref>
 ```
 
