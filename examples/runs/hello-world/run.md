@@ -2,7 +2,7 @@
 
 ## Description
 
-Example run showing a small Claude Code CCC flow with Codex plugin review stages.
+Example run showing a small Claude Code CCC flow with Codex CLI review stages.
 
 This example uses repository SHA `81e5af01a21287343e988d57809bb371e3ad0419` for illustration. Real runs should replace it with the output of `git rev-parse HEAD` at run start.
 

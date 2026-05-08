@@ -2,28 +2,26 @@
 
 This file is the canonical CCC workflow specification. README files and skills should point here instead of repeating these rules.
 
-CCC is a single-session Claude Code coordinator workflow. Claude Code owns the run, writes plan/code artifacts, and invokes the Codex plugin for Claude Code synchronously for review stages.
+CCC is a single-session Claude Code coordinator workflow. Claude Code owns the run, writes plan/code artifacts, and invokes the Codex CLI synchronously for review stages.
 
 Do not use `.ccc/current_run`; the output folder is always explicit.
 
 ## Requirements
 
-Use this protocol from Claude Code with the Codex plugin installed:
+Use this protocol from Claude Code with the Codex CLI installed and authenticated:
 
 ```text
-/plugin marketplace add openai/codex-plugin-cc
-/plugin install codex@openai-codex
-/reload-plugins
-/codex:setup
+codex login
+codex --version
+codex exec --help
+codex exec review --help
 ```
 
-The plugin provides `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`, `/codex:status`, `/codex:result`, and `/codex:cancel`. CCC uses foreground review calls with `--wait`; it must not use background jobs as a polling loop.
+CCC uses non-interactive Codex CLI calls. It must not ask the user to run `/codex:` slash commands.
 
-This protocol targets the command surface documented by [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) `v1.0.4`. If the installed plugin version differs, run `/codex:setup` and verify that `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` are still supported before starting a CCC run.
+This protocol targets `codex-cli 0.129.0` and requires `codex exec`, `codex exec review`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
 
-On `/ccc run`, if plugin compatibility is unclear, the coordinator should ask the user to confirm that the installed Codex plugin supports the required `--wait` and `--base` flags. If compatibility cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
-
-`/codex:rescue` is not part of the normal CCC transition graph. Use it only when a plugin invocation fails or when the user explicitly asks for a separate Codex investigation. Rescue output cannot replace a CCC review artifact unless the coordinator captures it as raw transcript and normalizes it into the required review schema.
+On `/ccc run`, if CLI compatibility is unclear, the coordinator should run the help commands above. If compatibility cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 ## Syntax
 
@@ -39,7 +37,7 @@ If rounds are omitted, use `2,2`.
 
 ```text
 driver    Claude Code; writes task, run, plan, code, state, verdicts, and done files
-reviewer  Codex plugin for Claude Code; provides review findings and review signal
+reviewer  Codex CLI; provides review findings and review signal
 ```
 
 Stage ownership:
@@ -51,7 +49,7 @@ code_vN          driver
 review_vN        reviewer, invoked by driver
 ```
 
-The coordinator runs these stages sequentially in one Claude Code session. It may stop for user direction on `BLOCKER`, invalid plugin output, failed validation, or max-round exhaustion.
+The coordinator runs these stages sequentially in one Claude Code session. It may stop for user direction on `BLOCKER`, invalid Codex output, failed validation, or max-round exhaustion.
 
 CCC has no multi-session safety layer. Exactly one Claude Code coordinator session may be active for a given `<output_folder>` at a time. Starting a second coordinator on the same run can race artifact, `.done`, and `run.md` writes.
 
@@ -163,65 +161,65 @@ Status semantics:
 ```text
 active    the single-session coordinator is still running or resumable
 complete  the workflow has an approving code review verdict
-blocked   the workflow has a BLOCKER verdict, invalid plugin output, failed validation, or needs user direction
+blocked   the workflow has a BLOCKER verdict, invalid Codex output, failed validation, or needs user direction
 max-rounds-reached  the workflow exhausted the configured max version without approval
 canceled  the user canceled the run
 ```
 
 All `run.md` writes use a temporary file in the same directory, then an atomic rename.
 
-## Codex Plugin Review Calls
+## Codex CLI Review Calls
 
 ### Invocation Mechanism
 
-Claude Code skills cannot assume they can programmatically type slash commands. In this repository, reviewer stages use a foreground manual handoff:
+Reviewer stages run Codex from the shell. The coordinator provides the review prompt on stdin and captures the final Codex message with `--output-last-message`:
 
 ```text
-1. The coordinator prints the exact /codex:... --wait command to run.
-2. The user submits that slash command in the same Claude Code session.
-3. When the Codex plugin returns, the user continues or resumes CCC.
-4. The coordinator saves the raw plugin output before writing the CCC review artifact.
+1. Build a reviewer prompt from task.md, the relevant artifacts, and git baseline data.
+2. Run the appropriate non-interactive codex command from the repository root.
+3. Write the final Codex message directly to state/<stage>.codex.raw.md.
+4. Normalize that raw message into the CCC review artifact.
 ```
 
-Assume plugin output is returned inline in the Claude Code conversation. The coordinator copies that inline output into `state/<stage>.codex.raw.md` before writing any normalized CCC review artifact.
+If the Codex command exits non-zero, the raw transcript is missing, or the raw transcript is empty, stop with `Status: blocked`.
 
-If a future Claude Code environment exposes the Codex plugin through callable tools, the coordinator may use those tools directly, but the raw transcript and artifact validation rules stay the same.
-
-Plan review uses the steerable read-only review command:
+Plan review uses `codex exec` in read-only mode:
 
 ```text
-/codex:adversarial-review --wait Review <output_folder>/artifacts/plan_vN.md against <output_folder>/task.md. Do not edit code. Return findings, questions, and whether the plan appears ready for implementation. The CCC coordinator will write the normalized review artifact and verdict.
+codex exec --sandbox read-only --output-last-message <output_folder>/state/plan_vN_review.codex.raw.md -
 ```
 
-For `plan_v1+`, include the previous plan and review in the focus text.
+The stdin prompt must ask Codex to review `<output_folder>/artifacts/plan_vN.md` against `<output_folder>/task.md`, avoid code edits, and return findings, questions, and whether the plan appears ready for implementation. For `plan_v1+`, include the previous plan and review in the prompt.
 
-The coordinator must save the unnormalized plugin output for each plan review at:
+The coordinator saves the unnormalized Codex output for each plan review at:
 
 ```text
 state/plan_vN_review.codex.raw.md
 ```
 
-Code review uses the normal Codex review command against the captured baseline:
+Code review uses `codex exec review` against the captured baseline:
 
 ```text
-/codex:review --wait --base <run_start_ref>
+codex exec review --base <run_start_ref> --uncommitted --output-last-message <output_folder>/state/review_vN.codex.raw.md -
 ```
 
-If extra scrutiny is needed, use:
+The stdin prompt must ask Codex to review the actual repository changes against `run_start_ref`, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
+
+If `run_start_ref_kind` is `empty_tree`, use `codex exec --sandbox read-only` instead and include the empty-tree diff commands from `Git Review Baseline` in the prompt:
 
 ```text
-/codex:adversarial-review --wait --base <run_start_ref> Focus on the CCC review artifact requirements, prior review findings, and regressions introduced since the baseline.
+codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.codex.raw.md -
 ```
 
-The coordinator must copy or summarize Codex plugin output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If plugin output does not clearly support a protocol verdict, the coordinator asks the plugin for clarification or stops with `Status: blocked`.
+The coordinator must copy or summarize Codex CLI output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If Codex output does not clearly support a protocol verdict, the coordinator asks Codex for clarification with another non-interactive call or stops with `Status: blocked`.
 
-The coordinator must save the unnormalized plugin output for each code review at:
+The coordinator saves the unnormalized Codex output for each code review at:
 
 ```text
 state/review_vN.codex.raw.md
 ```
 
-The CCC review artifact is an attested summary of the plugin output, not a replacement for it. The coordinator may write the final `VERDICT:` line itself after interpreting the plugin output, but it must not silently soften or discard material findings. If the plugin output does not clearly support one protocol verdict, stop with `Status: blocked`.
+The CCC review artifact is an attested summary of the Codex output, not a replacement for it. The coordinator may write the final `VERDICT:` line itself after interpreting the raw output, but it must not silently soften or discard material findings. If the raw output does not clearly support one protocol verdict, stop with `Status: blocked`.
 
 ## Git Review Baseline
 
@@ -292,9 +290,9 @@ coordinator writes state/plan_v0.done
 If `plan_vN.done` exists and `plan_vN_review.done` does not exist:
 
 ```text
-driver invokes Codex plugin for plan review
-driver writes state/plan_vN_review.codex.raw.md from plugin output
-driver writes artifacts/plan_vN_review.md from plugin output
+driver runs Codex CLI for plan review
+driver writes state/plan_vN_review.codex.raw.md from Codex output
+driver writes artifacts/plan_vN_review.md from Codex output
 coordinator writes state/plan_vN_review.done
 ```
 
@@ -322,9 +320,9 @@ coordinator writes state/code_v0.done
 If `code_vN.done` exists and `review_vN.done` does not exist:
 
 ```text
-driver invokes Codex plugin for code review
-driver writes state/review_vN.codex.raw.md from plugin output
-driver writes artifacts/review_vN.md from plugin output
+driver runs Codex CLI for code review
+driver writes state/review_vN.codex.raw.md from Codex output
+driver writes artifacts/review_vN.md from Codex output
 coordinator writes state/review_vN.done
 ```
 

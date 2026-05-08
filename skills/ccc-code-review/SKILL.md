@@ -1,6 +1,6 @@
 ---
 name: ccc-code-review
-description: CCC code review stage. Invoke the Codex plugin from Claude Code to review code_vN.md and actual repository changes against the CCC git baseline. Use only inside CCC.
+description: CCC code review stage. Run Codex CLI to review code_vN.md and actual repository changes against the CCC git baseline. Use only inside CCC.
 ---
 # Skill: CCC Code Review
 
@@ -32,12 +32,12 @@ Do not write `.done`.
 
 ## Rules
 
-* Print the exact `/codex:review --wait --base <run_start_ref>` command for the user to run in Claude Code, unless the environment explicitly exposes the plugin as a callable tool.
-* Use `/codex:adversarial-review --wait --base <run_start_ref>` only when focused challenge review is needed.
+* Run `codex exec review --base <run_start_ref> --uncommitted --output-last-message <RUN>/state/review_vN.codex.raw.md -` from the repository root.
+* For empty-tree baselines, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's empty-tree diff commands in the prompt.
 * Inspect the actual git diff using the `run_start_ref` from `run.md`.
 * Do not trust `code_vN.md` alone.
 * For `review_v1+`, focus on whether prior findings were fixed and whether new issues were introduced.
-* Save the raw plugin output to `state/review_vN.codex.raw.md` before writing the review artifact.
+* Save the raw Codex output to `state/review_vN.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
 * If Codex output does not clearly support a verdict, ask for clarification or stop as blocked.

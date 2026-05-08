@@ -1,21 +1,21 @@
 # ccc-agent-flow
 
-CCC is a Claude Code first workflow that uses the [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) for synchronous review passes.
+CCC is a Claude Code first workflow that uses the Codex CLI for automatic review passes.
 
-Claude Code plans and implements, then uses foreground Codex plugin slash commands for review stages in the same session.
+Claude Code plans and implements, then runs Codex non-interactively for review stages in the same session.
 
 ## Usage
 
-Install and set up the Codex plugin inside Claude Code:
+Install and authenticate the Codex CLI:
 
 ```text
-/plugin marketplace add openai/codex-plugin-cc
-/plugin install codex@openai-codex
-/reload-plugins
-/codex:setup
+codex login
+codex --version
+codex exec --help
+codex exec review --help
 ```
 
-The canonical protocol pins the supported `openai/codex-plugin-cc` command surface. If compatibility is unclear, CCC should block before writing stage artifacts.
+The canonical protocol pins the supported Codex CLI command surface. If compatibility is unclear, CCC should block before writing stage artifacts.
 
 Run CCC from Claude Code:
 
@@ -41,7 +41,7 @@ The canonical workflow, artifact names, verdicts, validation rules, and round se
 
 CCC runs sequentially in one Claude Code session.
 
-Claude Code writes plan and code artifacts. For review artifacts, the coordinator prints an exact foreground `/codex:... --wait` command, the user runs that slash command in Claude Code, then the coordinator captures the raw result, writes the required Markdown artifact, validates it, and continues. There is no polling loop.
+Claude Code writes plan and code artifacts. For review artifacts, the coordinator runs a non-interactive `codex` command, captures the final Codex message, writes the required Markdown artifact, validates it, and continues. There is no polling loop and no manual review trigger.
 
 Raw Codex output is kept beside the `.done` files:
 
@@ -55,8 +55,8 @@ Only one Claude Code coordinator session should be active for a given output fol
 Typical review calls:
 
 ```text
-/codex:adversarial-review --wait Review .ccc/runs/auth-fix/artifacts/plan_v0.md against .ccc/runs/auth-fix/task.md. Do not edit code. Return findings, questions, and whether the plan appears ready for implementation.
-/codex:review --wait --base <run_start_ref>
+codex exec --sandbox read-only --output-last-message .ccc/runs/auth-fix/state/plan_v0_review.codex.raw.md -
+codex exec review --base <run_start_ref> --uncommitted --output-last-message .ccc/runs/auth-fix/state/review_v0.codex.raw.md -
 ```
 
 ## Example
