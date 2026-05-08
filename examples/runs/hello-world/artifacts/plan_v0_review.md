@@ -6,7 +6,7 @@ The plan is clear but should state whether the command has CLI wiring.
 
 ## Findings
 
-The plan names a module but does not identify how users execute it.
+[major] The plan names a module but does not identify how users execute it.
 
 ## Questions
 

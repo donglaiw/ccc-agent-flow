@@ -39,6 +39,7 @@ Do not write `.done`.
 * `code_v0` means implement, verify, and summarize.
 * `code_v1+` means triage the previous review, fix accepted findings, verify, and summarize.
 * Include the protocol-defined git baseline in `code_vN.md`.
+* Do not create git commits during a CCC run.
 * Keep changes scoped.
 * Do not silently ignore review findings.
 * Do not claim tests passed unless commands actually ran.

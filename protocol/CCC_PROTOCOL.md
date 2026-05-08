@@ -32,7 +32,9 @@ On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator sh
 /ccc cancel <output_folder> "<reason>"
 ```
 
-If rounds are omitted, use `2,2`. If mode is omitted, use `auto`. If both optional arguments are present, rounds come before mode; if only one optional argument is present, parse `auto` or `manual` as mode and `N,M` as rounds.
+If rounds are omitted, use `2,2`. If mode is omitted, use `auto`. Optional arguments may appear in either order: parse `auto` or `manual` as mode and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
+
+Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `auto` unless `manual` is passed again.
 
 Mode behavior:
 
@@ -47,6 +49,8 @@ manual  complete one stage, write its artifact and .done file, update run.md, th
 driver    Claude Code; writes task, run, plan, code, state, verdicts, and done files
 reviewer  Codex CLI; provides review findings and review signal
 ```
+
+Driver stages must not create git commits during a CCC run. Keep changes in the working tree and commit only after the workflow reaches `complete`, `blocked`, `canceled`, or `max-rounds-reached`. This keeps `codex exec review --uncommitted` aligned with the run baseline.
 
 Stage ownership:
 
@@ -174,6 +178,8 @@ max-rounds-reached  the workflow exhausted the configured max version without ap
 canceled  the user canceled the run
 ```
 
+`max-rounds-reached` is reserved for budget exhaustion before an acceptable final verdict. If the only unresolved findings are minor, complete with `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; if any unresolved finding is major, use `blocked` and wait for human direction.
+
 All `run.md` writes use a temporary file in the same directory, then an atomic rename.
 
 ## Codex CLI Review Calls
@@ -213,6 +219,7 @@ Review whether the plan is correct, complete, scoped, and ready to implement.
 Return:
 ## Summary
 ## Findings
+Tag each finding as [minor] or [major].
 ## Questions
 ## Readiness
 READY: yes|no
@@ -232,7 +239,7 @@ Code review uses `codex exec review --uncommitted` when `HEAD` has not moved sin
 codex exec review --uncommitted --output-last-message <output_folder>/state/review_vN.codex.raw.md -
 ```
 
-Before using this command, confirm `run_start_ref_kind: head` and `git rev-parse HEAD` equals `run_start_ref`. In that normal case, `--uncommitted` is exhaustive because the run baseline is the current `HEAD`; it covers staged, unstaged, and untracked working-tree changes.
+Before using this command, confirm `run_start_ref_kind: head` and `git rev-parse HEAD` equals `run_start_ref`. In that normal case, `--uncommitted` is exhaustive because the run baseline is the current `HEAD`; it covers staged, unstaged, and untracked working-tree changes. If `HEAD` has moved, stop with `Status: blocked`; the run has a mid-run commit or external repository mutation and no longer satisfies the CCC review baseline.
 
 The stdin prompt must ask Codex to review the actual repository changes, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
 
@@ -252,6 +259,7 @@ Do not edit files.
 Return:
 ## Summary
 ## Findings
+Tag each finding as [minor] or [major].
 ## Tests to Add
 ## Questions
 ## Readiness
@@ -260,10 +268,31 @@ READY: yes|no
 
 The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
 
-If `run_start_ref_kind` is `empty_tree` or `HEAD` no longer equals `run_start_ref`, use `codex exec --sandbox read-only` instead because `codex exec review --uncommitted` only covers changes against current `HEAD`. Include the relevant diff commands from `Git Review Baseline` in the prompt:
+If `run_start_ref_kind` is `empty_tree`, use `codex exec --sandbox read-only` instead because `codex exec review --uncommitted` only covers changes against current `HEAD`. Include the relevant diff commands from `Git Review Baseline` in the prompt:
 
 ```text
 codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.codex.raw.md -
+```
+
+Use this fallback prompt shape:
+
+```text
+You are the CCC code reviewer for <stage>.
+Read <output_folder>/task.md, <output_folder>/run.md, and <output_folder>/artifacts/code_vN.md.
+For review_v1+, also read <output_folder>/artifacts/code_v{N-1}.md and <output_folder>/artifacts/review_v{N-1}.md.
+
+Review the actual repository changes, not only code_vN.md.
+Baseline: <run_start_ref>
+Use the empty-tree diff commands from Git Review Baseline to inspect the repository state.
+Do not edit files.
+Return:
+## Summary
+## Findings
+Tag each finding as [minor] or [major].
+## Tests to Add
+## Questions
+## Readiness
+READY: yes|no
 ```
 
 The coordinator must copy or summarize Codex CLI output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If Codex output does not clearly support a protocol verdict, the coordinator asks Codex for clarification with another non-interactive call or stops with `Status: blocked`.
@@ -335,7 +364,7 @@ Do not use substring matching.
 
 `BLOCKER` stops the workflow for user direction.
 
-Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge.
+Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge. Findings must be tagged `[minor]` or `[major]` in raw Codex review output. If severity is ambiguous, treat it as major.
 
 When no further plan or code version is allowed, the coordinator may override unresolved minor-only findings to `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue. If unresolved findings are major, stop with `Status: blocked` and ask for human direction instead of silently marking the run complete.
 

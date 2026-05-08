@@ -1,3 +1,3 @@
 Illustrative Codex CLI final message captured before CCC normalization:
 
-The plan is clear but should state whether the command has CLI wiring. It names a module but does not identify how users execute it.
+[major] The plan is clear but should state whether the command has CLI wiring. It names a module but does not identify how users execute it.

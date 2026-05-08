@@ -10,7 +10,7 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 
 ## Coordinator Checklist
 
-1. Parse the requested CCC action: `run`, `resume`, or `cancel`, plus optional mode `auto` or `manual`.
+1. Parse the requested CCC action: `run`, `resume`, or `cancel`, plus optional mode `auto` or `manual`; mode is not persisted and `resume` defaults to `auto`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
 4. For a new `run`, confirm `codex login status`, `codex exec --help`, and `codex exec review --help` exit successfully, or initialize the run as blocked.
@@ -35,6 +35,8 @@ For plan reviews, use `state/plan_vN_review.codex.raw.md`.
 For code reviews, use `state/review_vN.codex.raw.md`.
 
 If a code-review command mutates repository state, the Codex CLI exits non-zero, produces no raw transcript, or the output does not clearly support a verdict, stop with `Status: blocked`.
+
+Driver stages must not create git commits during a CCC run.
 
 ## Stage Skills
 

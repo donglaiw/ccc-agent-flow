@@ -12,7 +12,7 @@ Compared current work against `81e5af01a21287343e988d57809bb371e3ad0419`.
 
 ## Findings
 
-Only minor comment: real runs should include actual command output snippets when useful.
+[minor] Real runs should include actual command output snippets when useful.
 
 ## Tests to Add
 

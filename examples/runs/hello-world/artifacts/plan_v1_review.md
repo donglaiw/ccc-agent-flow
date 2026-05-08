@@ -6,7 +6,7 @@ The revised plan is scoped, testable, and clear.
 
 ## Findings
 
-No blocking findings.
+[minor] No blocking findings.
 
 ## Questions
 

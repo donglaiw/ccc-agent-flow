@@ -33,7 +33,8 @@ Do not write `.done`.
 ## Rules
 
 * If `HEAD` equals `run_start_ref`, run `codex exec review --uncommitted --output-last-message <RUN>/state/review_vN.codex.raw.md -` from the repository root.
-* If `HEAD` differs from `run_start_ref` or the baseline is empty-tree, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's diff commands in the prompt.
+* If `HEAD` differs from `run_start_ref`, stop as blocked because driver commits are not allowed during a CCC run.
+* If the baseline is empty-tree, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's fallback prompt and diff commands.
 * Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * Do not pass `--dangerously-bypass-approvals-and-sandbox`.
 * Capture `git diff` and `git diff --cached` before and after `codex exec review`; stop as blocked if they differ.
@@ -43,4 +44,5 @@ Do not write `.done`.
 * Save the raw Codex output to `state/review_vN.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
+* Treat ambiguous finding severity as major.
 * If Codex output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
