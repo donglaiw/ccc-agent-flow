@@ -243,6 +243,11 @@ def validate_artifact(path: Path, run_start_ref: str) -> None:
         verdicts = [line for line in text.splitlines() if line.startswith("VERDICT:")]
         if len(verdicts) != 1 or not VERDICT_RE.fullmatch(verdicts[0]):
             err(f"{path}: expected exactly one valid whole-line VERDICT")
+        raw_path = RUN / "state" / f"{path.stem}.codex.raw.md"
+        if not raw_path.exists():
+            err(f"{path}: missing raw Codex transcript {raw_path}")
+        elif not read(raw_path).strip():
+            err(f"{path}: raw Codex transcript is empty: {raw_path}")
 
     if kind == "plan":
         body = non_empty_section(path, text, "Changes Since Previous Plan Version")
@@ -324,7 +329,7 @@ def validate_artifact_done_pairs(artifact_paths: list[Path]) -> None:
 def validate_no_locks_dir() -> None:
     locks = RUN / "state" / "locks"
     if locks.exists():
-        err(f"{locks}: locks directory belongs to the two-session protocol, not protocol v2")
+        err(f"{locks}: locks directory belongs to the two-session protocol, not protocol v2; use the two-session branch or recreate the run")
 
 
 def main() -> int:

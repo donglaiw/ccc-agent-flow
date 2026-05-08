@@ -21,6 +21,10 @@ Use this protocol from Claude Code with the Codex plugin installed:
 
 The plugin provides `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`, `/codex:status`, `/codex:result`, and `/codex:cancel`. CCC uses foreground review calls with `--wait`; it must not use background jobs as a polling loop.
 
+This protocol targets the command surface documented by [`openai/codex-plugin-cc`](https://github.com/openai/codex-plugin-cc) `v1.0.4`. If the installed plugin version differs, run `/codex:setup` and verify that `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` are still supported before starting a CCC run.
+
+`/codex:rescue` is not part of the normal CCC transition graph. Use it only when a plugin invocation fails or when the user explicitly asks for a separate Codex investigation. Rescue output cannot replace a CCC review artifact unless the coordinator captures it as raw transcript and normalizes it into the required review schema.
+
 ## Syntax
 
 ```text
@@ -49,6 +53,8 @@ review_vN        reviewer, invoked by driver
 
 The coordinator runs these stages sequentially in one Claude Code session. It may stop for user direction on `BLOCKER`, invalid plugin output, failed validation, or max-round exhaustion.
 
+Protocol v2 has no multi-session safety layer. Exactly one Claude Code coordinator session may be active for a given `<output_folder>` at a time. Starting a second coordinator on the same run can race artifact, `.done`, and `run.md` writes.
+
 ## Rounds
 
 CCC uses zero-based versions. The two numeric arguments are maximum version indexes, equivalent to the number of allowed revisions after the initial `v0`.
@@ -75,6 +81,8 @@ The coordinator creates the run folder if needed:
 ```
 
 The run folder has no CCC-managed `logs/`, `context/`, or `locks/` directories in the default Claude Code workflow.
+
+Protocol v2 invariant: `<output_folder>/state/locks/` must not exist. A `state/locks/` directory means the folder belongs to the old two-session protocol; use the `two-session` branch or recreate the run as protocol v2.
 
 ## Run Metadata
 
@@ -190,6 +198,19 @@ All `run.md` writes use a temporary file in the same directory, then an atomic r
 
 ## Codex Plugin Review Calls
 
+### Invocation Mechanism
+
+Claude Code skills cannot assume they can programmatically type slash commands. In this repository, reviewer stages use a foreground manual handoff:
+
+```text
+1. The coordinator prints the exact /codex:... --wait command to run.
+2. The user submits that slash command in the same Claude Code session.
+3. When the Codex plugin returns, the user continues or resumes CCC.
+4. The coordinator saves the raw plugin output before writing the CCC review artifact.
+```
+
+If a future Claude Code environment exposes the Codex plugin through callable tools, the coordinator may use those tools directly, but the raw transcript and artifact validation rules stay the same.
+
 Plan review uses the steerable read-only review command:
 
 ```text
@@ -197,6 +218,12 @@ Plan review uses the steerable read-only review command:
 ```
 
 For `plan_v1+`, include the previous plan and review in the focus text.
+
+The coordinator must save the unnormalized plugin output for each plan review at:
+
+```text
+state/plan_vN_review.codex.raw.md
+```
 
 Code review uses the normal Codex review command against the captured baseline:
 
@@ -211,6 +238,14 @@ If extra scrutiny is needed, use:
 ```
 
 The coordinator must copy or summarize Codex plugin output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If plugin output is ambiguous or lacks a valid verdict, the coordinator asks the plugin for clarification or stops with `Status: blocked`.
+
+The coordinator must save the unnormalized plugin output for each code review at:
+
+```text
+state/review_vN.codex.raw.md
+```
+
+The CCC review artifact is an attested summary of the plugin output, not a replacement for it. The coordinator may write the final `VERDICT:` line itself after interpreting the plugin output, but it must not silently soften or discard material findings. If the plugin output does not clearly support one protocol verdict, stop with `Status: blocked`.
 
 ## Git Review Baseline
 
@@ -282,6 +317,7 @@ If `plan_vN.done` exists and `plan_vN_review.done` does not exist:
 
 ```text
 driver invokes Codex plugin for plan review
+driver writes state/plan_vN_review.codex.raw.md from plugin output
 driver writes artifacts/plan_vN_review.md from plugin output
 coordinator writes state/plan_vN_review.done
 ```
@@ -311,6 +347,7 @@ If `code_vN.done` exists and `review_vN.done` does not exist:
 
 ```text
 driver invokes Codex plugin for code review
+driver writes state/review_vN.codex.raw.md from plugin output
 driver writes artifacts/review_vN.md from plugin output
 coordinator writes state/review_vN.done
 ```
@@ -355,6 +392,12 @@ Max code version reached; latest artifact is code_vN.md and is not approved.
 ## Questions
 ## Verdict
 One protocol-approved verdict line.
+```
+
+Each `plan_vN_review.md` must have a corresponding non-empty raw transcript:
+
+```text
+state/plan_vN_review.codex.raw.md
 ```
 
 `code_vN.md` required sections:
@@ -404,6 +447,28 @@ One protocol-approved verdict line.
 run_start_ref: <sha>
 ```
 
+Each `review_vN.md` must have a corresponding non-empty raw transcript:
+
+```text
+state/review_vN.codex.raw.md
+```
+
+## Write Ordering
+
+For every stage, write files in this order:
+
+```text
+1. For reviewer stages, write state/<stage>.codex.raw.md.tmp and atomically rename it to state/<stage>.codex.raw.md.
+2. Write artifacts/<stage>.md.tmp.
+3. Validate the intended final artifact path and required raw transcript, when applicable.
+4. Atomically rename artifacts/<stage>.md.tmp to artifacts/<stage>.md.
+5. Write state/<stage>.done.tmp.
+6. Atomically rename state/<stage>.done.tmp to state/<stage>.done.
+7. Update run.md through a same-directory temporary file and atomic rename.
+```
+
+The `.done` file is the commit point for a stage. A coordinator resuming after a crash must ignore partial `*.tmp` files until a human intentionally repairs or removes them.
+
 ## Validation Before .done
 
 Before writing `.done`, the coordinator validates:
@@ -418,6 +483,7 @@ plan_v0 and code_v0 have required non-empty Changes Since text
 plan_v1+ and code_v1+ have non-empty Changes Since sections
 code_vN Git Baseline contains run_start_ref and current_head
 review_vN Diff Baseline SHA equals run_start_ref from run.md
+plan_vN_review and review_vN have non-empty state/<stage>.codex.raw.md files
 ```
 
 Filename-to-heading validation is exact:
@@ -450,6 +516,8 @@ Completed by CCC coordinator after artifact validation.
 `/ccc resume <output_folder>` reads `run.md`, `.done` files, artifact verdicts, and the configured rounds, then continues from the next missing stage.
 
 Resume must not infer workflow state only from `run.md`; `.done` files and artifact verdicts are the source of truth.
+
+If an artifact exists without the matching `.done`, the previous stage did not commit. The coordinator must stop and ask the user to choose one repair: rerun the stage and overwrite the artifact, move the artifact aside and resume, or manually validate it and write the `.done` only if it satisfies this protocol. If a `.done` exists without its artifact, the run is invalid and must be repaired before resume.
 
 ## Cancel
 

@@ -1,8 +1,8 @@
 # ccc-agent-flow
 
-CCC is a Claude Code first workflow that uses the [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) for synchronous review and rescue passes.
+CCC is a Claude Code first workflow that uses the [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) for synchronous review passes.
 
-The old two-session coordinator has been preserved on the `two-session` branch. `main` now defaults to a single Claude Code session: Claude Code plans and implements, then invokes Codex through the Claude Code plugin for review stages.
+The old two-session coordinator has been preserved on the pushed `two-session` branch. `main` now defaults to one Claude Code coordinator session: Claude Code plans and implements, then uses foreground Codex plugin slash commands for review stages.
 
 ## Usage
 
@@ -14,6 +14,8 @@ Install and set up the Codex plugin inside Claude Code:
 /reload-plugins
 /codex:setup
 ```
+
+CCC v2 targets the `openai/codex-plugin-cc` `v1.0.4` command surface. If your installed plugin differs, verify `/codex:setup`, `/codex:review --wait`, `/codex:review --base <ref>`, and `/codex:adversarial-review --wait` before starting a run.
 
 Run CCC from Claude Code:
 
@@ -39,7 +41,16 @@ The canonical workflow, artifact names, verdicts, validation rules, and round se
 
 CCC runs sequentially in one Claude Code session.
 
-Claude Code writes plan and code artifacts. For review artifacts, Claude Code invokes Codex plugin commands in the foreground, captures the review result, writes the required Markdown artifact, validates it, then continues. There is no peer-session wait loop and no polling inside the model.
+Claude Code writes plan and code artifacts. For review artifacts, the coordinator prints an exact foreground `/codex:... --wait` command, the user runs that slash command in Claude Code, then the coordinator captures the raw result, writes the required Markdown artifact, validates it, and continues. There is no peer-session wait loop and no polling inside the model.
+
+Raw Codex output is kept beside the `.done` files:
+
+```text
+state/plan_vN_review.codex.raw.md
+state/review_vN.codex.raw.md
+```
+
+Only one Claude Code coordinator session should be active for a given output folder.
 
 Typical review calls:
 

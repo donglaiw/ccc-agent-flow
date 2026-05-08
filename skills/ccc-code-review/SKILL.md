@@ -24,6 +24,7 @@ For `review_v1+`, also read:
 ## Output
 
 ```text
+<RUN>/state/review_vN.codex.raw.md
 <RUN>/artifacts/review_vN.md
 ```
 
@@ -31,9 +32,12 @@ Do not write `.done`.
 
 ## Rules
 
-* Invoke Codex from Claude Code with `/codex:review --wait --base <run_start_ref>` or `/codex:adversarial-review --wait --base <run_start_ref>` when focused challenge review is needed.
+* Print the exact `/codex:review --wait --base <run_start_ref>` command for the user to run in Claude Code, unless the environment explicitly exposes the plugin as a callable tool.
+* Use `/codex:adversarial-review --wait --base <run_start_ref>` only when focused challenge review is needed.
 * Inspect the actual git diff using the `run_start_ref` from `run.md`.
 * Do not trust `code_vN.md` alone.
 * For `review_v1+`, focus on whether prior findings were fixed and whether new issues were introduced.
+* Save the raw plugin output to `state/review_vN.codex.raw.md` before writing the review artifact.
 * Preserve Codex findings faithfully when writing the artifact.
-* If Codex output lacks a valid verdict, ask for clarification or stop as blocked.
+* The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
+* If Codex output lacks a clear verdict, ask for clarification or stop as blocked.
