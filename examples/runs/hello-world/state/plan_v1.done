@@ -1,6 +1,6 @@
 ---
 stage: plan_v1
-role: a1
+actor: driver
 artifact: artifacts/plan_v1.md
 status: complete
 ---

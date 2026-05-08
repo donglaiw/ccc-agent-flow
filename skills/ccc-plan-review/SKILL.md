@@ -1,6 +1,6 @@
 ---
 name: ccc-plan-review
-description: CCC plan review stage. Review plan_vN.md and decide whether planning is approved, needs changes, or is blocked. Use only inside CCC.
+description: CCC plan review stage. Invoke the Codex plugin from Claude Code to review plan_vN.md and produce plan_vN_review.md. Use only inside CCC.
 ---
 # Skill: CCC Plan Review
 
@@ -13,7 +13,7 @@ Use this skill only inside a CCC run. Read `protocol/CCC_PROTOCOL.md` first and 
 <RUN>/artifacts/plan_vN.md
 ```
 
-For `plan_v1+`, also read previous plan review context when available:
+For `plan_v1+`, also include previous plan review context when available:
 
 ```text
 <RUN>/artifacts/plan_v{N-1}.md
@@ -30,10 +30,9 @@ Do not write `.done`.
 
 ## Rules
 
-* Do not edit code.
-* Judge whether the plan is clear, scoped, verifiable, and responsive to the task.
-* For `plan_v1+`, focus on whether prior plan review findings were addressed.
-* Use only protocol-approved verdict lines.
-* Use `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS` only when the plan is ready for implementation.
-* Use `VERDICT: NEEDS_CHANGES` when `a1` should revise the plan within the current version limit.
-* Use `VERDICT: BLOCKER` when the task cannot proceed without user direction or missing external information.
+* Invoke Codex from Claude Code with `/codex:adversarial-review --wait`.
+* Ask Codex to review the plan against the task and return the CCC plan-review structure with exactly one valid verdict line.
+* Do not let Codex edit code during plan review.
+* Preserve Codex findings faithfully when writing the artifact.
+* If Codex output lacks a valid verdict, ask for clarification or stop as blocked.
+* Do not write code artifacts.

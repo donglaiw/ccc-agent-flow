@@ -1,53 +1,56 @@
 # ccc-agent-flow
 
-Minimal CCC skill design for coordinating coding collaboration between Claude Code and Codex.
+CCC is a Claude Code first workflow that uses the [Codex plugin for Claude Code](https://github.com/openai/codex-plugin-cc) for synchronous review and rescue passes.
+
+The old two-session coordinator has been preserved on the `two-session` branch. `main` now defaults to a single Claude Code session: Claude Code plans and implements, then invokes Codex through the Claude Code plugin for review stages.
 
 ## Usage
 
-Open two interactive sessions in the same repository and alternate turns between them.
-
-Session 1, acting as `a1`:
+Install and set up the Codex plugin inside Claude Code:
 
 ```text
-/ccc a1 .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
+/plugin marketplace add openai/codex-plugin-cc
+/plugin install codex@openai-codex
+/reload-plugins
+/codex:setup
 ```
 
-Session 2, acting as `a2`:
+Run CCC from Claude Code:
 
 ```text
-/ccc a2 .ccc/runs/auth-fix 2,2
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
 ```
 
-For Codex, use the equivalent skill phrasing:
+Resume an interrupted run:
 
 ```text
-Use the ccc skill as a1 with output folder .ccc/runs/auth-fix, task "Given the context above, implement the auth fix", and rounds 2,2.
-Use the ccc skill as a2 with output folder .ccc/runs/auth-fix and rounds 2,2.
+/ccc resume .ccc/runs/auth-fix
 ```
 
-`a1` owns planning and code changes. `a2` reviews both plans and code. The roles are intentionally positional so two interactive sessions can coordinate through artifacts and `.done` files.
-
-The canonical workflow, artifact names, verdicts, validation rules, locking rules, and round semantics live in [protocol/CCC_PROTOCOL.md](protocol/CCC_PROTOCOL.md).
-
-## Waiting
-
-The optional wait helper only waits for a `.done` file. It does not coordinate the workflow.
+Cancel a run:
 
 ```text
-scripts/ccc-wait-done.sh --timeout 600 .ccc/runs/auth-fix/state/plan_v0_review.done
+/ccc cancel .ccc/runs/auth-fix "No longer needed"
 ```
 
-Exit codes:
+The canonical workflow, artifact names, verdicts, validation rules, and round semantics live in [protocol/CCC_PROTOCOL.md](protocol/CCC_PROTOCOL.md).
+
+## How It Works
+
+CCC runs sequentially in one Claude Code session.
+
+Claude Code writes plan and code artifacts. For review artifacts, Claude Code invokes Codex plugin commands in the foreground, captures the review result, writes the required Markdown artifact, validates it, then continues. There is no peer-session wait loop and no polling inside the model.
+
+Typical review calls:
 
 ```text
-0    file appeared
-2    usage error
-124  timeout
+/codex:adversarial-review --wait Review .ccc/runs/auth-fix/artifacts/plan_v0.md against .ccc/runs/auth-fix/task.md. Do not edit code. Return the CCC plan-review structure and one valid VERDICT line.
+/codex:review --wait --base <run_start_ref>
 ```
 
 ## Example
 
-See [examples/runs/hello-world](examples/runs/hello-world) for a complete small run with plan, review, code, follow-up review, state sentinels, and `run.md`.
+See [examples/runs/hello-world](examples/runs/hello-world) for a complete small run with plan, Codex-backed review, code, follow-up review, state sentinels, and `run.md`.
 
 Validate a run folder with:
 

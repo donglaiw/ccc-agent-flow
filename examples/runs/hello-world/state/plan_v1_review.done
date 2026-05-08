@@ -1,6 +1,6 @@
 ---
 stage: plan_v1_review
-role: a2
+actor: reviewer
 artifact: artifacts/plan_v1_review.md
 status: complete
 ---

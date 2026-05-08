@@ -2,24 +2,31 @@
 
 This file is the canonical CCC workflow specification. README files and skills should point here instead of repeating these rules.
 
-CCC is an interactive two-role coordinator workflow. The output folder is always explicit.
+CCC is a single-session Claude Code coordinator workflow. Claude Code owns the run, writes plan/code artifacts, and invokes the Codex plugin for Claude Code synchronously for review stages.
 
-Do not use `.ccc/current_run`.
+The two-session lock-and-wait protocol is preserved on the `two-session` branch.
+
+Do not use `.ccc/current_run`; the output folder is always explicit.
+
+## Requirements
+
+Use this protocol from Claude Code with the Codex plugin installed:
+
+```text
+/plugin marketplace add openai/codex-plugin-cc
+/plugin install codex@openai-codex
+/reload-plugins
+/codex:setup
+```
+
+The plugin provides `/codex:review`, `/codex:adversarial-review`, `/codex:rescue`, `/codex:status`, `/codex:result`, and `/codex:cancel`. CCC uses foreground review calls with `--wait`; it must not use background jobs as a polling loop.
 
 ## Syntax
 
 ```text
-/ccc a1 <output_folder> "<task>" [plan_rounds,revision_rounds]
-/ccc a2 <output_folder> [plan_rounds,revision_rounds]
+/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds]
+/ccc resume <output_folder>
 /ccc cancel <output_folder> "<reason>"
-```
-
-For Codex:
-
-```text
-Use the ccc skill as a1 with output folder <output_folder>, task "<task>", and rounds 2,2.
-Use the ccc skill as a2 with output folder <output_folder> and rounds 2,2.
-Use the ccc skill to cancel output folder <output_folder> with reason "<reason>".
 ```
 
 If rounds are omitted, use `2,2`.
@@ -27,20 +34,20 @@ If rounds are omitted, use `2,2`.
 ## Roles
 
 ```text
-a1  writes plans and code artifacts; may edit repository code during code stages
-a2  reviews plans and code artifacts; must not edit repository code
+driver    Claude Code; writes task, run, plan, code, state, and done files
+reviewer  Codex plugin for Claude Code; provides review findings and verdicts
 ```
 
-Role ownership:
+Stage ownership:
 
 ```text
-plan_vN          a1
-plan_vN_review   a2
-code_vN          a1
-review_vN        a2
+plan_vN          driver
+plan_vN_review   reviewer, invoked by driver
+code_vN          driver
+review_vN        reviewer, invoked by driver
 ```
 
-Before acquiring any stage lock, the coordinator must derive the expected next stage and expected role from `.done` files and artifact verdicts. If the invoked role is not the expected role, it must stop before writing anything and report the expected role and waiting `.done` file.
+The coordinator runs these stages sequentially in one Claude Code session. It may stop for user direction on `BLOCKER`, invalid plugin output, failed validation, or max-round exhaustion.
 
 ## Rounds
 
@@ -65,14 +72,13 @@ The coordinator creates the run folder if needed:
   run.md
   artifacts/
   state/
-    locks/
 ```
 
-The run folder has no CCC-managed `logs/` or `context/` directories.
+The run folder has no CCC-managed `logs/`, `context/`, or `locks/` directories in the default Claude Code workflow.
 
 ## Run Metadata
 
-When starting a new run, `a1` writes `<output_folder>/task.md`, captures the run baseline files, and initializes `<output_folder>/run.md`.
+When starting a new run, the coordinator writes `<output_folder>/task.md`, captures the run baseline files, and initializes `<output_folder>/run.md`.
 
 `run.md` must include:
 
@@ -92,16 +98,17 @@ When starting a new run, `a1` writes `<output_folder>/task.md`, captures the run
 `## Metadata` uses machine-readable fields:
 
 ```text
-protocol_version: 1
+protocol_version: 2
+mode: claude-code-codex-plugin
 ```
 
 `## Description` is free-form text for humans.
 
-`## Roles` is an enumeration, not a single current role:
+`## Roles` is an enumeration:
 
 ```text
-a1: <tool/session/person>
-a2: <tool/session/person>
+driver: claude-code
+reviewer: codex-plugin-cc
 ```
 
 `## Rounds` uses machine-readable fields:
@@ -139,29 +146,28 @@ If `run_start_ref` is neither a valid git ref nor the empty-tree SHA, code revie
 
 ```text
 current_stage: <stage|none>
-expected_role: <a1|a2|none>
+expected_actor: <driver|reviewer|none>
 latest_artifact: <artifact path|none>
 latest_verdict: <APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER|none>
-next_waiting_for: <state file|complete|blocked|max-rounds-reached|canceled>
+next_action: <stage|complete|blocked|max-rounds-reached|canceled>
 ```
 
 Field values are constrained:
 
 ```text
 current_stage: none | plan_vN | plan_vN_review | code_vN | review_vN
-expected_role: a1 | a2 | none
+expected_actor: driver | reviewer | none
 latest_artifact: none | artifacts/plan_vN.md | artifacts/plan_vN_review.md | artifacts/code_vN.md | artifacts/review_vN.md
 latest_verdict: APPROVE | APPROVE_WITH_MINOR_COMMENTS | NEEDS_CHANGES | BLOCKER | none
-next_waiting_for: state/<stage>.done | complete | blocked | max-rounds-reached | canceled
+next_action: plan_vN | plan_vN_review | code_vN | review_vN | complete | blocked | max-rounds-reached | canceled
 ```
 
-`expected_role: none` is only valid when status is `complete`, `canceled`, `blocked`, or `max-rounds-reached`.
+`expected_actor: none` is only valid when status is `complete`, `canceled`, `blocked`, or `max-rounds-reached`.
 
 `## Status` must contain exactly one of:
 
 ```text
 active
-waiting
 complete
 blocked
 max-rounds-reached
@@ -171,17 +177,40 @@ canceled
 Status semantics:
 
 ```text
-active    a stage is currently in progress and the stage lock is held
-waiting   no stage is in progress and the next stage belongs to the other role
+active    the single-session coordinator is still running or resumable
 complete  the workflow has an approving code review verdict
-blocked   the workflow has a BLOCKER verdict or cannot continue without user direction
+blocked   the workflow has a BLOCKER verdict, invalid plugin output, failed validation, or needs user direction
 max-rounds-reached  the workflow exhausted the configured max version without approval
 canceled  the user canceled the run
 ```
 
-Existing runs with a different `protocol_version` must stop before writing and report the mismatch.
+Existing runs with a different `protocol_version` must stop before writing and report the mismatch. Two-session protocol v1 runs should be resumed from the `two-session` branch.
 
-All `run.md` writes use the atomic metadata-write procedure in `Locking and Atomic Writes`.
+All `run.md` writes use a temporary file in the same directory, then an atomic rename.
+
+## Codex Plugin Review Calls
+
+Plan review uses the steerable read-only review command:
+
+```text
+/codex:adversarial-review --wait Review <output_folder>/artifacts/plan_vN.md against <output_folder>/task.md. Do not edit code. Return the CCC plan-review artifact structure and exactly one valid VERDICT line.
+```
+
+For `plan_v1+`, include the previous plan and review in the focus text.
+
+Code review uses the normal Codex review command against the captured baseline:
+
+```text
+/codex:review --wait --base <run_start_ref>
+```
+
+If extra scrutiny is needed, use:
+
+```text
+/codex:adversarial-review --wait --base <run_start_ref> Focus on the CCC review artifact requirements, prior review findings, and regressions introduced since the baseline.
+```
+
+The coordinator must copy or summarize Codex plugin output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If plugin output is ambiguous or lacks a valid verdict, the coordinator asks the plugin for clarification or stops with `Status: blocked`.
 
 ## Git Review Baseline
 
@@ -236,7 +265,7 @@ Do not use substring matching.
 
 `APPROVE` and `APPROVE_WITH_MINOR_COMMENTS` allow the workflow to advance.
 
-`NEEDS_CHANGES` asks `a1` for the next plan or code version, if another version is allowed.
+`NEEDS_CHANGES` asks the driver for the next plan or code version, if another version is allowed.
 
 `BLOCKER` stops the workflow for user direction.
 
@@ -245,24 +274,25 @@ Do not use substring matching.
 If no plan exists:
 
 ```text
-a1 writes artifacts/plan_v0.md
-ccc writes state/plan_v0.done
+driver writes artifacts/plan_v0.md
+coordinator writes state/plan_v0.done
 ```
 
-If `plan_vN.done` exists, `plan_vN_review.done` does not exist, and `N < plan_rounds`:
+If `plan_vN.done` exists and `plan_vN_review.done` does not exist:
 
 ```text
-a2 writes artifacts/plan_vN_review.md
-ccc writes state/plan_vN_review.done
+driver invokes Codex plugin for plan review
+driver writes artifacts/plan_vN_review.md from plugin output
+coordinator writes state/plan_vN_review.done
 ```
 
-If `plan_vN_review.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, planning is approved and `a1` may write `artifacts/code_v0.md`.
+If `plan_vN_review.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, planning is approved and the driver may write `artifacts/code_v0.md`.
 
-If `plan_vN_review.md` says `VERDICT: NEEDS_CHANGES`, `a1` writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
+If `plan_vN_review.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
 
 If `plan_vN_review.md` says `VERDICT: BLOCKER`, stop.
 
-If the final allowed plan version has been written and has no allowed review stage, do not mark the workflow complete. Stop and report:
+If the final allowed plan version has been written and still is not approved, do not mark the workflow complete. Stop and report:
 
 ```text
 Max plan version reached; latest artifact is plan_vN.md and is not approved.
@@ -273,24 +303,25 @@ Max plan version reached; latest artifact is plan_vN.md and is not approved.
 After planning is approved:
 
 ```text
-a1 writes artifacts/code_v0.md
-ccc writes state/code_v0.done
+driver writes artifacts/code_v0.md
+coordinator writes state/code_v0.done
 ```
 
-If `code_vN.done` exists, `review_vN.done` does not exist, and `N < revision_rounds`:
+If `code_vN.done` exists and `review_vN.done` does not exist:
 
 ```text
-a2 writes artifacts/review_vN.md
-ccc writes state/review_vN.done
+driver invokes Codex plugin for code review
+driver writes artifacts/review_vN.md from plugin output
+coordinator writes state/review_vN.done
 ```
 
 If `review_vN.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, the workflow is complete.
 
-If `review_vN.md` says `VERDICT: NEEDS_CHANGES`, `a1` writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
+If `review_vN.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
 
-If `review_vN.md` says `VERDICT: BLOCKER`, stop unless the user explicitly directs `a1` to continue with a clear fix.
+If `review_vN.md` says `VERDICT: BLOCKER`, stop unless the user explicitly directs the driver to continue with a clear fix.
 
-If the final allowed code version has been written and has no allowed review stage, do not mark the workflow complete. Stop and report:
+If the final allowed code version has been written and still is not approved, do not mark the workflow complete. Stop and report:
 
 ```text
 Max code version reached; latest artifact is code_vN.md and is not approved.
@@ -400,89 +431,25 @@ review_v(0|[1-9][0-9]*)\.md        -> # Review v\1
 
 Versions are decimal integers with no leading zeros except `v0`.
 
-## Locking and Atomic Writes
-
-Before performing a stage, the coordinator derives the expected next stage and expected role. It must reject stale-role invocations before attempting any lock.
-
-If both a stage lock and `run.lock` are needed, acquire the stage lock first, then `run.lock`. Release in reverse order: `run.lock`, then the stage lock. Do not acquire these locks in the opposite order.
-
-Stage lock acquisition is the atomic test-and-set operation:
-
-```text
-mkdir <output_folder>/state/locks/<stage>.lock
-```
-
-If `mkdir` succeeds, this session owns the stage lock. If `mkdir` fails and there is no corresponding `.done` file, stop and report the lock path.
-
-Write artifacts, done files, and `run.md` through temporary files in the same directory, then rename them into place.
-
-Stage completion order is fixed:
-
-```text
-write artifact tmp
-validate artifact tmp
-rename artifact tmp to artifact
-write done tmp
-rename done tmp to done
-acquire run.lock
-write run.md tmp with updated Workflow State and Status
-rename run.md tmp to run.md
-release run.lock
-release stage lock
-```
-
-The coordinator derives the next stage from `.done` files and artifact verdicts. `run.md` is a machine-readable summary, not the source of truth for stage transitions.
-
-After the corresponding `.done` file is successfully written and synced, remove the stage lock directory:
-
-```text
-rmdir <output_folder>/state/locks/<stage>.lock
-```
-
-If a session crashes and leaves a stage lock, recovery is manual: verify no peer session is still working on that stage, verify there is no corresponding `.done` file, then remove the stale lock with `rmdir <output_folder>/state/locks/<stage>.lock`.
-
-`run.md` writes use a separate metadata lock:
-
-```text
-mkdir <output_folder>/state/locks/run.lock
-write <output_folder>/run.md.tmp
-rename run.md.tmp to run.md
-rmdir <output_folder>/state/locks/run.lock
-```
-
-If `run.lock` already exists, stop and report it.
-
-If a session crashes and leaves `run.lock`, recovery is manual: verify no peer session is still updating `run.md`, inspect any `run.md.tmp`, keep or remove that temp file intentionally, then remove the stale lock with `rmdir <output_folder>/state/locks/run.lock`.
-
-Only the `ccc` coordinator skill writes `.done` files. Individual stage skills must not write `.done`.
+Only the coordinator writes `.done` files. Individual stage skills must not write `.done`.
 
 Done file content:
 
 ```text
 ---
 stage: <stage>
-role: <a1|a2>
+actor: <driver|reviewer>
 artifact: artifacts/<artifact>.md
 status: complete
 ---
 Completed by CCC coordinator after artifact validation.
 ```
 
-## Waiting
+## Resume
 
-Never busy-poll inside the model.
+`/ccc resume <output_folder>` reads `run.md`, `.done` files, artifact verdicts, and the configured rounds, then continues from the next missing stage.
 
-When the next stage belongs to the other role, end with:
-
-```text
-CCC run: <output_folder>
-Current role: <a1|a2>
-Stage completed: none
-Waiting for: <output_folder>/state/<stage>.done
-Next role: <a1|a2>
-```
-
-Users may use `scripts/ccc-wait-done.sh` or their own external wait mechanism.
+Resume must not infer workflow state only from `run.md`; `.done` files and artifact verdicts are the source of truth.
 
 ## Cancel
 
@@ -492,9 +459,7 @@ To abandon a run, use:
 /ccc cancel <output_folder> "<reason>"
 ```
 
-Cancel must not hold `run.lock` while waiting for user confirmation. The coordinator first inspects `state/locks/*.lock`; for each stage lock, it prompts the user to confirm no peer session is active before removing that lock. User confirmation is the verification mechanism for clearing stage locks during cancel. After stage-lock cleanup, the coordinator acquires `state/locks/run.lock`, writes or updates `run.md` with `Status: canceled`, records the reason, removes `state/locks/run.lock`, and stops. Cancel does not delete artifacts.
-
-The coordinator may also write `state/canceled.done` for external waiters in a future protocol version. This version does not require a cancel sentinel.
+The coordinator writes or updates `run.md` with `Status: canceled`, records the reason, and stops. Cancel does not delete artifacts.
 
 ## Validator
 
@@ -506,9 +471,9 @@ Always end with:
 
 ```text
 CCC run: <output_folder>
-Current role: <a1|a2|cancel>
+Mode: claude-code-codex-plugin
 Stage completed: <stage|none>
-Next waiting point: <done-file|complete|blocked|max-rounds-reached|canceled>
+Next action: <stage|complete|blocked|max-rounds-reached|canceled>
 ```
 
 ## Stage Skills

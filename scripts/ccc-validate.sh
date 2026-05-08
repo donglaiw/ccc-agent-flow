@@ -43,9 +43,10 @@ CONTRACTS = {
     "review": ["Summary", "Diff Baseline", "Findings", "Tests to Add", "Questions", "Verdict"],
 }
 
-STATUS_VALUES = {"active", "waiting", "complete", "blocked", "max-rounds-reached", "canceled"}
+STATUS_VALUES = {"active", "complete", "blocked", "max-rounds-reached", "canceled"}
 TERMINAL_STATUS = {"complete", "blocked", "max-rounds-reached", "canceled"}
 VERDICT_VALUES = {"APPROVE", "APPROVE_WITH_MINOR_COMMENTS", "NEEDS_CHANGES", "BLOCKER", "none"}
+TERMINAL_ACTIONS = {"complete", "blocked", "max-rounds-reached", "canceled"}
 
 errors = []
 
@@ -90,6 +91,18 @@ def non_empty_section(path: Path, text: str, name: str) -> str:
     return body
 
 
+def stage_actor(stage: str) -> str:
+    if stage.startswith("plan_v") and not stage.endswith("_review"):
+        return "driver"
+    if stage.startswith("code_v"):
+        return "driver"
+    if stage.startswith("plan_v") and stage.endswith("_review"):
+        return "reviewer"
+    if stage.startswith("review_v"):
+        return "reviewer"
+    return ""
+
+
 def parse_run_md() -> tuple[str, str, dict]:
     run_md = RUN / "run.md"
     text = read(run_md)
@@ -106,8 +119,16 @@ def parse_run_md() -> tuple[str, str, dict]:
     )
 
     metadata = key_values(section(text, "Metadata"))
-    if metadata.get("protocol_version") != "1":
-        err("run.md: Metadata must contain protocol_version: 1")
+    if metadata.get("protocol_version") != "2":
+        err("run.md: Metadata must contain protocol_version: 2")
+    if metadata.get("mode") != "claude-code-codex-plugin":
+        err("run.md: Metadata must contain mode: claude-code-codex-plugin")
+
+    roles = key_values(section(text, "Roles"))
+    if roles.get("driver") != "claude-code":
+        err("run.md: Roles must contain driver: claude-code")
+    if roles.get("reviewer") != "codex-plugin-cc":
+        err("run.md: Roles must contain reviewer: codex-plugin-cc")
 
     rounds = key_values(section(text, "Rounds"))
     for key in ("plan_rounds", "revision_rounds"):
@@ -138,9 +159,9 @@ def parse_run_md() -> tuple[str, str, dict]:
     if current_stage != "none" and not (current_stage and STAGE_RE.fullmatch(current_stage)):
         err("run.md: Workflow State current_stage must be none or a valid stage")
 
-    expected_role = workflow.get("expected_role")
-    if expected_role not in {"a1", "a2", "none"}:
-        err("run.md: Workflow State expected_role must be a1, a2, or none")
+    expected_actor = workflow.get("expected_actor")
+    if expected_actor not in {"driver", "reviewer", "none"}:
+        err("run.md: Workflow State expected_actor must be driver, reviewer, or none")
 
     latest_verdict = workflow.get("latest_verdict")
     if latest_verdict not in VERDICT_VALUES:
@@ -150,11 +171,9 @@ def parse_run_md() -> tuple[str, str, dict]:
     if latest_artifact and latest_artifact != "none" and not (RUN / latest_artifact).exists():
         err(f"run.md: latest_artifact points to missing file {latest_artifact}")
 
-    next_waiting_for = workflow.get("next_waiting_for", "")
-    if next_waiting_for.startswith("state/") and not next_waiting_for.endswith(".done"):
-        err("run.md: next_waiting_for state path must end in .done")
-    elif next_waiting_for not in {"complete", "blocked", "max-rounds-reached", "canceled"} and not next_waiting_for.startswith("state/"):
-        err("run.md: next_waiting_for has invalid value")
+    next_action = workflow.get("next_action", "")
+    if next_action not in TERMINAL_ACTIONS and not STAGE_RE.fullmatch(next_action):
+        err("run.md: Workflow State next_action must be a valid stage or terminal action")
 
     status_lines = [line.strip() for line in section(text, "Status").splitlines() if line.strip()]
     if len(status_lines) != 1 or status_lines[0] not in STATUS_VALUES:
@@ -163,23 +182,23 @@ def parse_run_md() -> tuple[str, str, dict]:
     else:
         status = status_lines[0]
 
-    if expected_role == "none" and status and status not in TERMINAL_STATUS:
-        err("run.md: expected_role none is only valid for terminal statuses")
+    if expected_actor == "none" and status and status not in TERMINAL_STATUS:
+        err("run.md: expected_actor none is only valid for terminal statuses")
 
-    if status in TERMINAL_STATUS and expected_role and expected_role != "none":
-        err("run.md: terminal statuses require expected_role: none")
+    if status in TERMINAL_STATUS and expected_actor and expected_actor != "none":
+        err("run.md: terminal statuses require expected_actor: none")
 
-    expected_waiting = {
+    expected_actions = {
         "complete": "complete",
         "blocked": "blocked",
         "max-rounds-reached": "max-rounds-reached",
         "canceled": "canceled",
     }
-    if status in expected_waiting and next_waiting_for != expected_waiting[status]:
-        err(f"run.md: Status {status} requires next_waiting_for: {expected_waiting[status]}")
+    if status in expected_actions and next_action != expected_actions[status]:
+        err(f"run.md: Status {status} requires next_action: {expected_actions[status]}")
 
-    if status == "waiting" and not next_waiting_for.startswith("state/"):
-        err("run.md: Status waiting requires next_waiting_for: state/<stage>.done")
+    if status == "active" and not STAGE_RE.fullmatch(next_action):
+        err("run.md: Status active requires next_action to be a valid stage")
 
     current_done = RUN / "state" / f"{current_stage}.done"
     if current_stage and current_stage != "none" and not current_done.exists():
@@ -252,10 +271,15 @@ def validate_done_file(path: Path) -> None:
     values = key_values(text)
     stage = values.get("stage")
     artifact = values.get("artifact")
+    actor = values.get("actor")
+
     if not stage:
         err(f"{path}: missing stage")
     elif path.stem != stage:
         err(f"{path}: done filename must match stage")
+
+    if stage and actor != stage_actor(stage):
+        err(f"{path}: actor must be {stage_actor(stage)}")
 
     if values.get("status") != "complete":
         err(f"{path}: status must be complete")
@@ -268,10 +292,6 @@ def validate_done_file(path: Path) -> None:
             err(f"{path}: artifact path missing: {artifact}")
     else:
         err(f"{path}: missing artifact")
-
-
-def expected_artifact_path(stage: str) -> Path:
-    return RUN / "artifacts" / f"{stage}.md"
 
 
 def artifact_stage(path: Path) -> str:
@@ -301,21 +321,16 @@ def validate_artifact_done_pairs(artifact_paths: list[Path]) -> None:
             err(f"{path}: missing matching done file {done_path}")
 
 
-def validate_terminal_locks(status: str) -> None:
+def validate_no_locks_dir() -> None:
     locks = RUN / "state" / "locks"
-    if not locks.exists():
-        return
-
-    if status in TERMINAL_STATUS:
-        for path in locks.iterdir():
-            if path.name != ".gitkeep":
-                err(f"{locks}: terminal run must not contain stale lock {path.name}")
+    if locks.exists():
+        err(f"{locks}: locks directory belongs to the two-session protocol, not protocol v2")
 
 
 def main() -> int:
     if not RUN.exists() or not RUN.is_dir():
         err(f"run folder does not exist: {RUN}")
-    run_start_ref, status, _ = parse_run_md()
+    run_start_ref, _, _ = parse_run_md()
 
     artifacts = RUN / "artifacts"
     artifact_paths = []
@@ -334,7 +349,7 @@ def main() -> int:
     else:
         for path in sorted(state.glob("*.done")):
             validate_done_file(path)
-        validate_terminal_locks(status)
+        validate_no_locks_dir()
 
     if errors:
         for message in errors:
