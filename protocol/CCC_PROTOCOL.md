@@ -22,7 +22,7 @@ CCC uses non-interactive Codex CLI calls. It must not ask the user to run `/code
 
 This protocol targets `codex-cli 0.129.0` and requires `codex login status`, `codex exec`, `codex exec review`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
 
-On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator should run `codex login status` and the help commands above. If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
+On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator should run `codex login status` and the help commands above. Use exit codes, not output text, as the contract: a non-zero `codex login status` means unauthenticated. If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 ## Syntax
 
@@ -211,6 +211,8 @@ Return:
 READY: yes|no
 ```
 
+The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
+
 The coordinator saves the unnormalized Codex output for each plan review at:
 
 ```text
@@ -225,7 +227,7 @@ codex exec review --base <run_start_ref> --uncommitted --output-last-message <ou
 
 The stdin prompt must ask Codex to review the actual repository changes against `run_start_ref`, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready.
 
-`codex exec review` does not accept `--sandbox`; CCC relies on the dedicated review subcommand and must not pass `--dangerously-bypass-approvals-and-sandbox`. To guard the repository, capture `git status --short`, `git diff`, and `git diff --cached` immediately before and after the Codex review command. If the before/after outputs differ, stop with `Status: blocked` and report that the reviewer mutated repository state.
+`codex exec review` does not accept `--sandbox`; CCC relies on the dedicated review subcommand and must not pass `--dangerously-bypass-approvals-and-sandbox`. To guard tracked and staged repository content, capture `git diff` and `git diff --cached` immediately before and after the Codex review command. If the before/after outputs differ, stop with `Status: blocked`, report the mutation diff to the user, and require the user to restore or stash those changes before resuming.
 
 With `--base <run_start_ref> --uncommitted`, CCC expects the review to cover both committed changes relative to `run_start_ref` and staged, unstaged, and untracked working-tree changes. The prompt must state that expectation explicitly.
 
@@ -249,7 +251,9 @@ Return:
 READY: yes|no
 ```
 
-If `run_start_ref_kind` is `empty_tree`, use `codex exec --sandbox read-only` instead and include the empty-tree diff commands from `Git Review Baseline` in the prompt:
+The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
+
+If `run_start_ref_kind` is `empty_tree`, use `codex exec --sandbox read-only` instead because `codex exec review --base` expects a normal git base. Include the empty-tree diff commands from `Git Review Baseline` in the prompt:
 
 ```text
 codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.codex.raw.md -

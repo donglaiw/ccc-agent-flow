@@ -13,7 +13,7 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 1. Parse the requested CCC action: `run`, `resume`, or `cancel`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
-4. For a new `run`, confirm `codex login status`, `codex exec --help`, and `codex exec review --help` work, or initialize the run as blocked.
+4. For a new `run`, confirm `codex login status`, `codex exec --help`, and `codex exec review --help` exit successfully, or initialize the run as blocked.
 5. For a new `run`, write `task.md` and initialize `run.md`, including the git baseline required by the protocol.
 6. Determine the next stage from `.done` files and artifact verdicts.
 7. For driver stages, perform the matching stage skill directly.

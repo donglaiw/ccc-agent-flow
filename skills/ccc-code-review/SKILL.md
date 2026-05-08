@@ -36,7 +36,7 @@ Do not write `.done`.
 * For empty-tree baselines, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's empty-tree diff commands in the prompt.
 * Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * Do not pass `--dangerously-bypass-approvals-and-sandbox`.
-* Capture `git status --short`, `git diff`, and `git diff --cached` before and after `codex exec review`; stop as blocked if they differ.
+* Capture `git diff` and `git diff --cached` before and after `codex exec review`; stop as blocked if they differ.
 * Inspect the actual git diff using the `run_start_ref` from `run.md`.
 * Do not trust `code_vN.md` alone.
 * For `review_v1+`, focus on whether prior findings were fixed and whether new issues were introduced.
