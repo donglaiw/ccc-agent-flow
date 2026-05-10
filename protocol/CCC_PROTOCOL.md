@@ -27,22 +27,23 @@ On `/ccc run`, if CLI compatibility or auth state is unclear, the coordinator sh
 ## Syntax
 
 ```text
-/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds] [auto|manual]
-/ccc resume <output_folder> [auto|manual]
+/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds] [manual|normal|auto]
+/ccc resume <output_folder> [manual|normal|auto]
 /ccc cancel <output_folder> "<reason>"
 ```
 
-If rounds are omitted, use `2,2`. If mode is omitted, use `auto`. Optional arguments may appear in either order: parse `auto` or `manual` as mode and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
+If rounds are omitted, use `2,2`. If mode is omitted, use `normal`. Optional arguments may appear in either order: parse `manual`, `normal`, or `auto` as mode and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
 
 On parse errors, print the error and stop without creating or modifying the run folder.
 
-Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `auto` unless `manual` is passed again.
+Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `normal` unless `manual` or `auto` is passed again.
 
 Mode behavior:
 
 ```text
-auto    run stages until complete, blocked, canceled, or max-rounds-reached
-manual  complete one stage, write its artifact and .done file, update run.md, then stop
+manual  complete one stage, write its artifact and .done file, update run.md, then stop for user approval before the next stage
+normal  run stages until complete, blocked, canceled, or max-rounds-reached; unresolved major reviewer disagreement waits for a human decision
+auto    run stages until complete, canceled, or hard failure; unresolved reviewer disagreement does not require human approval
 ```
 
 ## Roles
@@ -63,7 +64,7 @@ code_vN          driver
 review_vN        reviewer, invoked by driver
 ```
 
-The coordinator runs these stages sequentially in one Claude Code session. It may stop for user direction on `BLOCKER`, invalid Codex output, failed validation, or max-round exhaustion.
+The coordinator runs these stages sequentially in one Claude Code session. In `manual` mode it stops after every completed stage for user approval. In `normal` mode it may stop for user direction on `BLOCKER`, invalid Codex output, failed validation, or max-round exhaustion. In `auto` mode it does not stop solely because the reviewer and driver still disagree, but hard failures still block the run.
 
 CCC has no multi-session safety layer. Exactly one Claude Code coordinator session may be active for a given `<output_folder>` at a time. Starting a second coordinator on the same run can race artifact, `.done`, and `run.md` writes.
 
@@ -78,7 +79,7 @@ plan_v0 -> plan_v0_review -> plan_v1 -> plan_v1_review -> plan_v2
 code_v0 -> review_v0 -> code_v1 -> review_v1 -> code_v2
 ```
 
-This is three possible plan artifacts and three possible code artifacts. The final artifact at the maximum version is a max-rounds stop point, not an approval.
+This is three possible plan artifacts and three possible code artifacts. The final artifact at the maximum version is a decision point, not automatically an approval in `manual` or `normal` mode. `auto` mode may override unresolved reviewer disagreement at this point.
 
 ## Output Folder
 
@@ -180,7 +181,9 @@ max-rounds-reached  the workflow exhausted the configured max version without ap
 canceled  the user canceled the run
 ```
 
-`max-rounds-reached` is reserved for budget exhaustion before an acceptable final verdict. If the only unresolved findings are minor, complete with `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; if any unresolved finding is major, use `blocked` and wait for human direction.
+`max-rounds-reached` is reserved for defensive budget exhaustion before an acceptable final verdict. In normal coordinator flow, `normal` mode either completes minor-only unresolved findings with `VERDICT: APPROVE_WITH_MINOR_COMMENTS` or blocks on major unresolved findings. `auto` mode converts reviewer-disagreement exhaustion into an explicit auto override and completes. Hard failures still use `blocked`.
+
+In `auto` mode, reviewer disagreement is not a blocking reason by itself. Hard failures still block: invalid CLI or auth state, failed commands, missing raw transcripts, validation failure, repository mutation, `HEAD` divergence, invalid baseline, parse errors, and user cancellation.
 
 All `run.md` writes use a temporary file in the same directory, then an atomic rename.
 
@@ -333,7 +336,7 @@ git diff --cached
 git diff
 ```
 
-This keeps committed mid-cycle changes reviewable. `git diff --cached` and `git diff` catch staged and unstaged changes that are not in `HEAD`.
+Driver commits during a run are not allowed. The intended review surface is the working tree relative to `run_start_ref`; `git diff --cached` and `git diff` catch staged and unstaged tracked changes that are not in `HEAD`.
 
 If the run started dirty, compare current status and diffs against `state/run_start.status`, `state/run_start.diff`, and `state/run_start_cached.diff` before assigning findings to the CCC run.
 
@@ -364,11 +367,13 @@ Do not use substring matching.
 
 `NEEDS_CHANGES` asks the driver for the next plan or code version, if another version is allowed.
 
-`BLOCKER` stops the workflow for user direction.
+`BLOCKER` stops the workflow for user direction in `manual` or `normal` mode. In `auto` mode, a reviewer `BLOCKER` is treated as reviewer disagreement unless it identifies a hard failure that prevents the coordinator from producing, validating, or reviewing artifacts.
 
 Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge. Findings must be tagged `[minor]` or `[major]` in raw Codex review output, and the coordinator must preserve those tags in the normalized artifact's `## Findings` body. If severity is ambiguous, treat it as major.
 
-When no further plan or code version is allowed, the coordinator may override unresolved minor-only findings to `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue. If unresolved findings are major, stop with `Status: blocked` and ask for human direction instead of silently marking the run complete.
+When no further plan or code version is allowed in `normal` mode, the coordinator may override unresolved minor-only findings to `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue. If unresolved findings are major, stop with `Status: blocked` and ask for human direction instead of silently marking the run complete.
+
+When no further plan or code version is allowed in `auto` mode, the coordinator may override unresolved reviewer disagreement, including `[major]` findings or a reviewer `BLOCKER`, to `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue. The review artifact must preserve all `[minor]` and `[major]` findings and include an explicit `AUTO OVERRIDE:` note in `## Summary` or `## Findings`. In this case `APPROVE_WITH_MINOR_COMMENTS` means the driver is proceeding by auto policy, not that reviewer consensus was reached. `auto` mode must not override hard failures.
 
 ## Planning Transitions
 
@@ -392,11 +397,11 @@ If `plan_vN_review.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_C
 
 If `plan_vN_review.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
 
-If `N` already equals `plan_rounds`, unresolved minor-only issues may be treated as `VERDICT: APPROVE_WITH_MINOR_COMMENTS`. Major unresolved issues stop the run for human direction.
+If `N` already equals `plan_rounds`, `normal` mode may treat unresolved minor-only issues as `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; major unresolved issues stop the run for human direction. `auto` mode may write an explicit auto override as `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and continue.
 
-If `plan_vN_review.md` says `VERDICT: BLOCKER`, stop.
+If `plan_vN_review.md` says `VERDICT: BLOCKER`, stop in `manual` or `normal` mode. In `auto` mode, treat it as `NEEDS_CHANGES` while another plan version is allowed; at the final allowed plan version, use the auto-override rule unless the blocker is a hard failure.
 
-If the final allowed plan version has been written and still is not approved, do not mark the workflow complete. Stop and report:
+In `manual` or `normal` mode, if the final allowed plan version has been written and still is not approved, do not mark the workflow complete. Stop and report:
 
 ```text
 Max plan version reached; latest artifact is plan_vN.md and is not approved.
@@ -424,11 +429,11 @@ If `review_vN.md` says `VERDICT: APPROVE` or `VERDICT: APPROVE_WITH_MINOR_COMMEN
 
 If `review_vN.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
 
-If `N` already equals `revision_rounds`, unresolved minor-only issues may be treated as `VERDICT: APPROVE_WITH_MINOR_COMMENTS`. Major unresolved issues stop the run for human direction.
+If `N` already equals `revision_rounds`, `normal` mode may treat unresolved minor-only issues as `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; major unresolved issues stop the run for human direction. `auto` mode may write an explicit auto override as `VERDICT: APPROVE_WITH_MINOR_COMMENTS` and complete.
 
-If `review_vN.md` says `VERDICT: BLOCKER`, stop unless the user explicitly directs the driver to continue with a clear fix.
+If `review_vN.md` says `VERDICT: BLOCKER`, stop in `manual` or `normal` mode unless the user explicitly directs the driver to continue with a clear fix. In `auto` mode, treat it as `NEEDS_CHANGES` while another code version is allowed; at the final allowed code version, use the auto-override rule unless the blocker is a hard failure.
 
-If the final allowed code version has been written and still is not approved, do not mark the workflow complete. Stop and report:
+In `manual` or `normal` mode, if the final allowed code version has been written and still is not approved, do not mark the workflow complete. Stop and report:
 
 ```text
 Max code version reached; latest artifact is code_vN.md and is not approved.

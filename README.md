@@ -24,14 +24,23 @@ Run CCC from Claude Code:
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
 ```
 
-Default mode is fully automatic. To stop after each completed CCC stage, add `manual`:
+Default mode is `normal`: CCC keeps running automatically, but waits for a human decision if major reviewer disagreement remains after the configured rounds.
+
+Use `manual` to require approval after each completed CCC stage:
 
 ```text
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 manual
 /ccc resume .ccc/runs/auth-fix manual
 ```
 
-Mode is not persisted; `resume` defaults to `auto` unless `manual` is passed again.
+Use `auto` to keep going without human approval when the reviewer and driver still disagree:
+
+```text
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 auto
+/ccc resume .ccc/runs/auth-fix auto
+```
+
+Mode is not persisted; `resume` defaults to `normal` unless `manual` or `auto` is passed again.
 
 Do not commit during an active CCC run; commit after the run reaches a terminal state.
 
