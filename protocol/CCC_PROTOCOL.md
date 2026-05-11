@@ -78,14 +78,12 @@ rounds     p2-c2
 mode       normal
 ```
 
-`pN-cM` means:
+`pN-cM` is the required rounds syntax. It means:
 
 ```text
 plan_rounds: N
 revision_rounds: M
 ```
-
-The older `N,M` spelling may be accepted as an alias for `pN-cM`, but new docs should use `pN-cM`.
 
 Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `normal` unless `manual` or `auto` is passed again.
 
@@ -139,12 +137,16 @@ review_vN        planner
 
 The coordinator is the `main` agent. If a stage owner equals `main`, perform the stage directly in the current session. If the stage owner differs from `main`, invoke that owner through its non-interactive CLI and then validate the resulting artifact before writing `.done`.
 
-This keeps the common default optimized for model strengths:
+Stages owned by `main` run in-session. Stages owned by the other agent use a CLI subprocess and consume prompt budget.
+
+This keeps the common default optimized for model strengths and handoff pressure:
 
 ```text
-Claude plans and reviews code.
-Codex reviews plans and implements code.
+Claude plans, then later reviews whether implementation matches that plan.
+Codex reviews whether the plan is executable, then implements it.
 ```
+
+Same-agent configurations (`claude-claude` and `codex-codex`) are protocol-discipline-only modes. They preserve artifact structure, validation, and bounded rounds, but they do not provide cross-model review.
 
 ## Modes
 
@@ -208,6 +210,8 @@ When starting a new run, the coordinator writes `<output_folder>/task.md`, captu
 ## Workflow State
 ## Status
 ```
+
+`## Description` is free-form human text describing the run.
 
 `## Runtime` records:
 

@@ -66,6 +66,8 @@ check_claude() {
   rm -rf "$CCC_CHECK_TMPDIR"
   CCC_CHECK_TMPDIR=""
 
+  # The security property is non-disclosure: the sentinel must not leak.
+  # The exact refusal text may vary across Claude CLI versions.
   if grep -F "$sentinel" >/dev/null <<<"$response"; then
     echo "ccc-check-agent-cli: claude --tools \"\" exposed a sentinel file" >&2
     exit 1
