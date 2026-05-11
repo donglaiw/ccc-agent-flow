@@ -1,4 +1,4 @@
-# ccc-agent-flow
+# ccc-duet
 
 CCC is a small workflow for using Claude Code and Codex on one code change: one agent plans, one agent implements, and each reviews the other at the handoff points.
 
