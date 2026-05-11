@@ -2,17 +2,19 @@
 
 ## Description
 
-Example run showing a small `codex-first` CCC flow with reviewer stages.
+Example run showing `main=codex plan-code=claude-codex p2-c2 normal`.
 
 This example uses repository SHA `81e5af01a21287343e988d57809bb371e3ad0419` for illustration. Real runs should replace it with the output of `git rev-parse HEAD` at run start.
 
 ## Runtime
 
-workflow: codex-first
-driver: codex
-reviewer: claude-code-cli
+main: codex
+planner: claude
+coder: codex
+plan_code: claude-codex
 session_detected: codex
-workflow_source: explicit
+main_source: explicit
+plan_code_source: default
 
 ## Rounds
 

@@ -1,44 +1,45 @@
 ---
 name: ccc
-description: Coordinate the CCC single-session workflow using a companion reviewer CLI, explicit output folders, protocol-defined artifacts, and .done sentinels.
+description: Coordinate the CCC single-session workflow using configurable main/planner/coder agents, explicit output folders, protocol-defined artifacts, and .done sentinels.
 ---
 # Skill: CCC Coordinator
 
-Use this skill to coordinate a CCC run from one driver session. Claude-first uses Codex CLI as reviewer; Codex-first uses Claude Code CLI as reviewer.
+Use this skill to coordinate a CCC run from one main session. `main=claude|codex` selects the coordinator. `plan-code=<planner>-<coder>` selects who owns planning and implementation.
 
 Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical source for syntax, roles, rounds, artifact contracts, validation, resume behavior, cancel behavior, and final output.
 
 ## Coordinator Checklist
 
-1. Parse the requested CCC action: `run`, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, and optional workflow `claude-first` or `codex-first`; mode is not persisted and `resume` defaults to `normal`.
+1. Parse the requested CCC action: `run`, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, optional `main=claude|codex`, optional `plan-code=<planner>-<coder>`, and optional rounds `pN-cM`; mode is not persisted and `resume` defaults to `normal`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
-4. Detect or validate the workflow before writing artifacts. Use explicit workflow arguments first, then `CCC_WORKFLOW`, then `scripts/ccc-detect-session.sh` (`claude` maps to `claude-first`; `codex` maps to `codex-first`). `CCC_WORKFLOW` is case-sensitive; ignore values other than `claude-first` or `codex-first`. If detection is unclear, stop and ask the user to rerun with `claude-first` or `codex-first`.
-5. For a new `run`, confirm the workflow-specific reviewer CLI exits successfully, using `scripts/ccc-check-reviewer-cli.sh <workflow>` when practical, or initialize the run as blocked.
-6. For a new `run`, write `task.md` and initialize `run.md`, including `## Runtime` and the git baseline required by the protocol.
-7. Determine the next stage from `.done` files and artifact verdicts.
-8. For driver stages, perform the matching stage skill directly.
-9. For reviewer stages, run the matching non-interactive reviewer command and capture its final message in `state/<review-stage>.review.raw.md`.
-10. Validate the artifact, write the `.done` file, update `run.md`, and continue according to mode:
+4. Resolve `main`, defaulting to `main=claude`; explicit `main=...` wins, then `CCC_MAIN`, then default `claude`. Run `scripts/ccc-detect-session.sh` separately and record `session_detected`; stop on a confident mismatch unless the user explicitly confirms it.
+5. Resolve `plan-code`, defaulting to `claude-codex`; explicit `plan-code=...` wins, then `CCC_PLAN_CODE`, then default.
+6. For a new `run`, confirm required companion CLIs exit successfully, using `scripts/ccc-check-agent-cli.sh <agent>` when practical, or initialize the run as blocked.
+7. For a new `run`, write `task.md` and initialize `run.md`, including `## Runtime` and the git baseline required by the protocol.
+8. Determine the next stage from `.done` files and artifact verdicts.
+9. Resolve the stage owner from `plan-code`: planner owns `plan_vN` and `review_vN`; coder owns `plan_vN_review` and `code_vN`.
+10. If the stage owner is `main`, perform the matching stage skill directly. If not, invoke the owner through its non-interactive CLI.
+11. Validate the artifact, write the `.done` file, update `run.md`, and continue according to mode:
    * `manual` stops for user approval after one completed stage.
    * `normal` runs until complete or a human decision is needed.
    * `auto` runs through reviewer disagreement until complete unless a hard failure blocks the run.
 
 ## Reviewer CLI
 
-Reviewer stages are automatic shell commands:
+Off-main stages are automatic shell commands:
 
 ```text
 1. Build the review prompt from the protocol template.
-2. Run the workflow-specific reviewer command from the repository root.
-3. Write the CCC review artifact as an attested summary of that raw output.
+2. Run the configured owner command from the repository root.
+3. For review stages, write the CCC review artifact as an attested summary of the raw output.
 ```
 
 For plan reviews, use `state/plan_vN_review.review.raw.md`.
 
 For code reviews, use `state/review_vN.review.raw.md`.
 
-If a code-review command mutates repository state, the reviewer CLI exits non-zero, produces no raw transcript, or the output does not clearly support a verdict, stop with `Status: blocked`.
+If a code-review command mutates repository state, the companion CLI exits non-zero, produces no required raw transcript, or the output does not clearly support a verdict, stop with `Status: blocked`.
 
 In `auto` mode, unresolved reviewer disagreement may be overridden only as described in the protocol. Preserve all review findings, use `VERDICT: APPROVE_AUTO_OVERRIDE`, and write exactly one `AUTO OVERRIDE:` line in `## Summary`; do not override hard failures.
 

@@ -1,6 +1,6 @@
 ---
 name: ccc-code
-description: CCC code stage. Implement or revise code_vN.md from the approved plan and prior review. Use only inside CCC.
+description: CCC code stage. The configured coder implements or revises code_vN.md from the approved plan and prior review. Use only inside CCC.
 ---
 # Skill: CCC Code
 
@@ -38,6 +38,7 @@ Do not write `.done`.
 
 * `code_v0` means implement, verify, and summarize.
 * `code_v1+` means triage the previous review, fix accepted findings, verify, and summarize.
+* The configured coder owns this stage.
 * Include the protocol-defined git baseline in `code_vN.md`.
 * Do not create git commits during a CCC run.
 * Keep changes scoped.

@@ -1,27 +1,36 @@
 # ccc-agent-flow
 
-CCC is a minimal coordination protocol for one incremental code change reviewed by two frontier coding agents.
+CCC is a minimal coordination protocol for one incremental code change reviewed by Claude Code and Codex.
 
-One agent is the driver: it plans, edits, verifies, and writes the CCC artifacts. The other agent is the reviewer: it critiques the plan or code through a non-interactive CLI call. The driver then either revises, blocks for human direction, or finishes with an explicit verdict.
+It separates three choices that are often conflated:
 
-Choose the direction by choosing who should own the edit:
-
-| Start With | Use | Best When |
+| Choice | Meaning | Default |
 |---|---|---|
-| Claude Code first | `claude-first` | You want Claude Code to drive planning and implementation, with Codex acting as the outside reviewer. |
-| Codex first | `codex-first` | You want Codex to drive planning and implementation, with Claude Code acting as the outside reviewer. |
+| `main=claude|codex` | Which agent session coordinates the run. | `main=claude` |
+| `plan-code=<planner>-<coder>` | Which agent plans and which agent implements. | `plan-code=claude-codex` |
+| `manual|normal|auto` | How much human approval is needed between stages. | `normal` |
 
-If you are not sure, start with the agent you are already using. CCC keeps both directions structurally identical: same run folder, same artifact names, same review contract, same modes, same validator.
+The default is intentionally opinionated:
+
+```text
+main=claude plan-code=claude-codex p2-c2 normal
+```
+
+That means Claude Code coordinates the run, Claude plans, Codex implements, each side can request up to two revisions, and unresolved major disagreement blocks for human direction. This matches the common model-strength split: Claude is often better at planning and review, while Codex is often better at implementation.
+
+Run from Codex instead when that is where your subscription, context window, or active work already lives:
+
+```text
+main=codex plan-code=claude-codex p2-c2 normal
+```
 
 The loop is intentionally narrow:
 
 ```text
-task -> plan -> review -> revise plan -> code -> review -> revise code -> verdict
+task -> plan -> plan review -> code -> code review -> revision or verdict
 ```
 
-This repo is not a general autonomous software-engineering agent, a whole-repository project manager, or a generic multi-agent framework. It is a small, file-based workflow for making one change safer by forcing Claude Code and Codex to exchange structured artifacts, raw review transcripts, and bounded revision rounds.
-
-That narrow scope is the point. CCC is useful when a single coding agent can probably make the change, but you want a second model to challenge the plan and diff before you accept it.
+This repo is not a general autonomous software-engineering agent, a whole-repository project manager, or a generic multi-agent framework. It is a small, file-based workflow for making one change safer by forcing two coding agents to exchange structured artifacts, raw review transcripts, and bounded revision rounds.
 
 Good fits:
 
@@ -43,25 +52,40 @@ The canonical protocol lives in [protocol/CCC_PROTOCOL.md](protocol/CCC_PROTOCOL
 
 ## Why This Exists
 
-Most coding-agent projects are either single-agent editing tools or broad multi-agent frameworks. CCC is different because it is deliberately specific:
+Most coding-agent projects are either single-agent editing tools or broad multi-agent frameworks. CCC is deliberately specific:
 
-- **Claude Code and Codex are peers.** Either can drive, and either can review.
-- **The workflow is symmetric.** `claude-first` and `codex-first` use the same artifacts, stages, verdicts, modes, and validator.
+- **Planning and implementation are configurable.** Use the default `claude-codex`, reverse it with `codex-claude`, or run same-agent loops with `claude-claude` or `codex-codex`.
+- **The main session is configurable.** Coordinate from Claude or Codex without changing the artifact contract.
 - **Artifacts are the interface.** Plans, reviews, code summaries, raw transcripts, and `.done` sentinels live in the run folder.
 - **Review is bounded.** Rounds are explicit, so disagreement terminates as `blocked`, `complete`, or `APPROVE_AUTO_OVERRIDE` instead of looping forever.
 - **No framework runtime is required.** CCC is a protocol plus skills and shell scripts, not a daemon, service, database, or graph engine.
-- **The reviewer receives a self-contained prompt.** The driver must include the relevant task, artifacts, and git outputs, so review does not depend on hidden session memory.
+- **The reviewer receives a self-contained prompt.** The coordinator includes the relevant task, artifacts, and git outputs, so review does not depend on hidden session memory.
 
-## Workflows
+## Stage Ownership
 
-| Workflow | Driver | Reviewer | Reviewer command | Review surface |
-|---|---|---|---|---|
-| `claude-first` | Claude Code | Codex CLI | `codex exec --sandbox read-only ...` | Self-contained prompt assembled by Claude Code. |
-| `codex-first` | Codex | Claude Code CLI | `claude --print ... --tools ""` | Self-contained prompt assembled by Codex. |
+`plan-code=<planner>-<coder>` controls the four stage owners:
 
-Install and authenticate the reviewer CLI for the workflow you use.
+| Stage | Owner |
+|---|---|
+| `plan_vN` | planner |
+| `plan_vN_review` | coder |
+| `code_vN` | coder |
+| `review_vN` | planner |
 
-For `claude-first`:
+Examples:
+
+| Config | Behavior |
+|---|---|
+| `plan-code=claude-codex` | Claude plans and reviews code; Codex reviews plans and implements. |
+| `plan-code=codex-claude` | Codex plans and reviews code; Claude reviews plans and implements. |
+| `plan-code=claude-claude` | Claude owns every stage, still using CCC artifacts and validation. |
+| `plan-code=codex-codex` | Codex owns every stage, still using CCC artifacts and validation. |
+
+## Setup
+
+Install and authenticate whichever companion CLI may be invoked by the main session.
+
+For Codex:
 
 ```text
 codex login
@@ -70,7 +94,7 @@ codex --version
 codex exec --help
 ```
 
-For `codex-first`:
+For Claude Code:
 
 ```text
 claude --version
@@ -81,23 +105,34 @@ printf 'Return READY only.\n' | claude --print --output-format text --no-session
 Optional compatibility checks:
 
 ```text
-scripts/ccc-check-reviewer-cli.sh claude-first
-scripts/ccc-check-reviewer-cli.sh codex-first
+scripts/ccc-check-agent-cli.sh codex
+scripts/ccc-check-agent-cli.sh claude
 ```
 
 ## Usage
 
-Run from the driver session:
+Default run:
 
 ```text
-/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix"
 ```
 
-Pass the workflow explicitly when detection is unclear:
+Equivalent explicit form:
 
 ```text
-/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 claude-first
-/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 codex-first
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" main=claude plan-code=claude-codex p2-c2 normal
+```
+
+Run the coordinator from Codex while keeping Claude as planner and Codex as coder:
+
+```text
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" main=codex plan-code=claude-codex p2-c2 normal
+```
+
+Reverse the planning and coding assignment:
+
+```text
+/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" main=claude plan-code=codex-claude p2-c2 normal
 ```
 
 Resume or cancel:
@@ -107,25 +142,52 @@ Resume or cancel:
 /ccc cancel .ccc/runs/auth-fix "No longer needed"
 ```
 
-## Detection
+## Arguments
 
-Explicit workflow arguments are preferred when you already know which direction you want:
+Optional arguments may appear in any order.
+
+| Argument | Values | Default |
+|---|---|---|
+| `main=...` | `main=claude`, `main=codex` | `main=claude` |
+| `plan-code=...` | `claude-codex`, `codex-claude`, `claude-claude`, `codex-codex` | `plan-code=claude-codex` |
+| rounds | `p1-c1`, `p2-c2`, `p3-c2`, etc. | `p2-c2` |
+| mode | `manual`, `normal`, `auto` | `normal` |
+
+`p2-c2` means:
 
 ```text
-claude-first
-codex-first
+2 plan revisions after plan_v0
+2 code revisions after code_v0
 ```
+
+So the maximum versions are:
+
+```text
+plan_v0 -> plan_v1 -> plan_v2
+code_v0 -> code_v1 -> code_v2
+```
+
+## Detection
+
+Explicit `main=...` is preferred.
 
 Selection precedence:
 
 ```text
-explicit workflow argument
-CCC_WORKFLOW=claude-first or CCC_WORKFLOW=codex-first
-scripts/ccc-detect-session.sh
-ask user to pass claude-first or codex-first
+main=claude or main=codex argument
+CCC_MAIN=claude or CCC_MAIN=codex
+default main=claude
 ```
 
-`CCC_WORKFLOW` values are case-sensitive. Any other value is treated as absent.
+`CCC_MAIN` values are case-sensitive. Any other value is treated as absent.
+
+`plan-code` selection is simpler:
+
+```text
+plan-code=... argument
+CCC_PLAN_CODE=claude-codex, codex-claude, claude-claude, or codex-codex
+default plan-code=claude-codex
+```
 
 `scripts/ccc-detect-session.sh` uses environment markers:
 
@@ -136,19 +198,21 @@ both present -> unknown
 otherwise -> unknown
 ```
 
-Detection maps `claude` to `claude-first` and `codex` to `codex-first`. Explicit `claude-first` or `codex-first` is always authoritative and recommended when running Codex from a shell that may have inherited Claude markers.
+Detection records `session_detected` and lets the coordinator catch obvious mismatches. If you run CCC from Codex, pass `main=codex` explicitly or set `CCC_MAIN=codex`.
 
 `run.md` records:
 
 ```text
-workflow: <claude-first|codex-first>
-driver: <claude-code|codex>
-reviewer: <codex-cli|claude-code-cli>
+main: <claude|codex>
+planner: <claude|codex>
+coder: <claude|codex>
+plan_code: <claude-codex|codex-claude|claude-claude|codex-codex>
 session_detected: <claude|codex|unknown>
-workflow_source: <explicit|env|detected|persisted>
+main_source: <explicit|env|default|persisted>
+plan_code_source: <explicit|env|default|persisted>
 ```
 
-On resume, `workflow_source: persisted` means the workflow was reused from `run.md`; CCC does not retain the original selection source separately.
+On resume, persisted values are reused unless explicitly overridden.
 
 ## Modes
 
@@ -160,37 +224,24 @@ Default mode is `normal`.
 | `normal` | Keep running, but block for human direction on major unresolved disagreement. |
 | `auto` | Continue through reviewer disagreement and use `VERDICT: APPROVE_AUTO_OVERRIDE` at the final allowed version. Hard infrastructure or protocol failures still block. |
 
-Examples:
-
-```text
-/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 manual
-/ccc resume .ccc/runs/auth-fix manual
-/ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 auto
-/ccc resume .ccc/runs/auth-fix auto
-```
-
 Mode is not persisted; `resume` defaults to `normal` unless `manual` or `auto` is passed again.
 
 ## Review Contract
 
-Both workflows use the same self-contained review contract. The driver includes the task, relevant CCC artifacts, and relevant git outputs in the reviewer prompt. The reviewer output is captured as:
+All cross-agent calls use a self-contained prompt. The coordinator includes the task, relevant CCC artifacts, and relevant git outputs. The reviewer output is captured as:
 
 ```text
 state/plan_vN_review.review.raw.md
 state/review_vN.review.raw.md
 ```
 
-The reviewer should evaluate the prompt as the review surface. This symmetry is a tradeoff: the reviewer does not independently re-derive the whole changeset. Review integrity depends on the driver assembling the prompt faithfully, the raw transcript being preserved, and the pre/post git-diff mutation guard catching reviewer-side edits.
+This symmetry is a tradeoff: the reviewer does not independently re-derive the whole changeset. Review integrity depends on the coordinator assembling the prompt faithfully, preserving the raw transcript, and using the pre/post git-diff mutation guard around code review commands.
 
-CCC blocks instead of silently truncating when the UTF-8 byte length of the full reviewer stdin payload exceeds:
+CCC blocks instead of silently truncating when the UTF-8 byte length of the full stdin payload exceeds:
 
 ```text
 CCC_REVIEW_PROMPT_MAX_BYTES=200000
 ```
-
-`claude-first` uses Codex in read-only sandbox mode. `codex-first` uses Claude Code with tools disabled through `--tools ""`; CCC checks that the CLI accepts this mode and also verifies that tracked and staged diffs do not change during code review. The `--tools ""` behavior is a Claude CLI contract, not an independent sandbox proof.
-
-Current runs require `## Runtime` in `run.md` and `.review.raw.md` transcript names. Older local experiment folders that used `.codex.raw.md` should be recreated or renamed before validation.
 
 ## Rules
 
@@ -206,7 +257,7 @@ Bundled examples:
 
 ```text
 examples/runs/hello-world
-examples/runs/hello-world-codex-first
+examples/runs/hello-world-main-codex
 examples/runs/hello-world-auto-override
 ```
 
@@ -214,7 +265,7 @@ Validate them with:
 
 ```text
 scripts/ccc-validate.sh examples/runs/hello-world
-scripts/ccc-validate.sh examples/runs/hello-world-codex-first
+scripts/ccc-validate.sh examples/runs/hello-world-main-codex
 scripts/ccc-validate.sh examples/runs/hello-world-auto-override
 ```
 
@@ -237,7 +288,7 @@ CCC sits near several existing coding-agent projects, but it has a narrower targ
 | Project | What It Is Good At | How CCC Differs |
 |---|---|---|
 | [OpenHands](https://github.com/All-Hands-AI/OpenHands) | autonomous software-engineering agents, sandboxed execution, SWE-style tasks | CCC is not a full autonomous agent runtime; it coordinates one bounded Claude/Codex change loop. |
-| [Aider](https://github.com/Aider-AI/aider) | practical git-aware pair programming with strong editing UX | CCC separates driver and reviewer into two different agents and persists structured review artifacts. |
+| [Aider](https://github.com/Aider-AI/aider) | practical git-aware pair programming with strong editing UX | CCC separates planning, coding, and review ownership into explicit artifacts. |
 | Aider architect/editor patterns | splitting planning and editing across model roles | CCC specializes the pattern for Claude Code and Codex with explicit review rounds and verdicts. |
 | [AutoGen](https://github.com/microsoft/autogen) | general multi-agent conversations and tool orchestration | CCC is not a framework; it is a concrete protocol for a specific coding workflow. |
 | [LangGraph](https://github.com/langchain-ai/langgraph) | state-machine and graph orchestration for long-running agents | CCC uses plain files and shell-callable CLIs instead of requiring a graph runtime. |
@@ -247,18 +298,7 @@ CCC sits near several existing coding-agent projects, but it has a narrower targ
 The closest conceptual shape is a generator-reviewer loop:
 
 ```text
-driver model -> plan/code artifact -> reviewer model -> critique -> driver revision
+planner -> plan -> coder review -> coder implementation -> planner review -> revision or verdict
 ```
 
-CCC keeps that shape small and concrete: one driver, one reviewer, one run folder, one incremental change. It is closer to a reproducible collaboration protocol than to an agent framework.
-
-Study these projects for different reasons:
-
-| Need | Look At |
-|---|---|
-| autonomous SWE-agent runtime | OpenHands |
-| practical git-aware editing UX | Aider |
-| generic multi-agent conversations | AutoGen |
-| explicit state-machine orchestration | LangGraph |
-| role-specialized software pipelines | MetaGPT |
-| research/demo multi-agent coding conversations | ChatDev |
+CCC keeps that shape small and concrete: one coordinator, two configurable stage owners, one run folder, one incremental change.

@@ -1,6 +1,6 @@
 ---
 name: ccc-plan
-description: CCC planning stage. Write or revise plan_vN.md from the task and prior plan review. Use only inside CCC.
+description: CCC planning stage. The configured planner writes or revises plan_vN.md from the task and prior plan review. Use only inside CCC.
 ---
 # Skill: CCC Plan
 
@@ -33,6 +33,7 @@ Do not write `.done`.
 ## Rules
 
 * Do not edit code during planning.
+* The configured planner owns this stage.
 * Keep the plan scoped to the task.
 * For `plan_v1+`, directly address the prior plan review findings in `Changes Since Previous Plan Version`.
 * Do not silently ignore review findings.

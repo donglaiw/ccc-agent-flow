@@ -2,86 +2,118 @@
 
 This file is the canonical CCC workflow specification. README files and skills should point here instead of repeating these rules.
 
-CCC is a single-session coordinator workflow. The active session owns the run, writes plan/code artifacts, and invokes the other agent synchronously for review stages.
+CCC is a single-session coordinator workflow for one incremental code change. The coordinator runs in either Claude Code or Codex, assigns planning and coding stages to Claude or Codex, writes versioned artifacts, and stops at a clear verdict.
 
 Do not use `.ccc/current_run`; the output folder is always explicit.
 
-## Requirements
+## Defaults
 
-CCC supports two workflows:
-
-```text
-claude-first  Claude Code is the driver; Codex CLI is the reviewer.
-codex-first   Codex is the driver; Claude Code CLI is the reviewer.
-```
-
-For `claude-first`, install and authenticate the Codex CLI:
+The default run is:
 
 ```text
-codex login
-codex login status
-codex --version
-codex exec --help
+main=claude plan-code=claude-codex p2-c2 normal
 ```
 
-For `codex-first`, install and authenticate the Claude Code CLI:
+Meaning:
 
 ```text
-claude --version
-claude --help
-claude --print --output-format text --no-session-persistence --tools "" "Return READY"
+main=claude              Claude Code coordinates the run.
+plan-code=claude-codex   Claude owns planning and code review; Codex owns plan review and coding.
+p2-c2                    allow plan_v0..plan_v2 and code_v0..code_v2.
+normal                   block for human direction on unresolved major disagreement.
 ```
 
-CCC uses non-interactive reviewer calls. It must not ask the user to run `/codex:` or `/claude:` slash commands.
+Use `main=codex` when the coordinator should run from Codex because that is where the active context, subscription, or token budget lives.
 
-The `claude-first` workflow targets `codex-cli 0.128.0` or newer and requires `codex login status`, `codex exec`, `--sandbox read-only`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
+## Agents
 
-The `codex-first` workflow requires `claude --print`, `--output-format text`, `--no-session-persistence`, and `--tools ""`. `claude --help` must document that `--tools ""` disables all tools. The compatibility precheck must also run a stdin smoke test such as:
+CCC recognizes two agent names in configuration:
 
 ```text
-printf 'Return READY only.\n' | claude --print --output-format text --no-session-persistence --tools ""
+claude
+codex
 ```
 
-For a stronger local check, run:
+CLI requirements:
 
 ```text
-scripts/ccc-check-reviewer-cli.sh codex-first
+claude  Claude Code CLI with `claude --print`
+codex   Codex CLI with `codex exec`
 ```
 
-This behavioral check creates a temporary sentinel file, asks Claude to read it while `--tools ""` is active, and fails if the sentinel appears in the response. It is still a CLI contract check, not a formal sandbox proof.
+Check local CLI compatibility when practical:
 
-If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
+```text
+scripts/ccc-check-agent-cli.sh claude
+scripts/ccc-check-agent-cli.sh codex
+```
+
+CCC uses non-interactive companion calls. It must not ask the user to run `/codex:` or `/claude:` slash commands.
 
 ## Syntax
 
 ```text
-/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds] [manual|normal|auto] [claude-first|codex-first]
-/ccc resume <output_folder> [manual|normal|auto] [claude-first|codex-first]
+/ccc run <output_folder> "<task>" [pN-cM] [manual|normal|auto] [main=claude|main=codex] [plan-code=<planner>-<coder>]
+/ccc resume <output_folder> [manual|normal|auto] [main=claude|main=codex] [plan-code=<planner>-<coder>]
 /ccc cancel <output_folder> "<reason>"
 ```
 
-If rounds are omitted, use `2,2`. If mode is omitted, use `normal`. If workflow is omitted on `run`, detect it. If workflow is omitted on `resume`, use the persisted workflow. Optional arguments may appear in any order: parse `manual`, `normal`, or `auto` as mode; `claude-first` or `codex-first` as workflow; and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
+Valid `plan-code` values:
 
-On parse errors or failed workflow detection, print the error and stop without creating or modifying the run folder.
+```text
+plan-code=claude-codex
+plan-code=codex-claude
+plan-code=claude-claude
+plan-code=codex-codex
+```
+
+Optional arguments may appear in any order. Reject duplicate arguments of the same type. On parse errors, print the error and stop without creating or modifying the run folder.
+
+Argument defaults:
+
+```text
+main       claude
+plan-code  claude-codex
+rounds     p2-c2
+mode       normal
+```
+
+`pN-cM` means:
+
+```text
+plan_rounds: N
+revision_rounds: M
+```
+
+The older `N,M` spelling may be accepted as an alias for `pN-cM`, but new docs should use `pN-cM`.
 
 Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `normal` unless `manual` or `auto` is passed again.
 
-Workflow is persisted in `run.md`. `/ccc resume <output_folder>` uses the persisted workflow unless `claude-first` or `codex-first` is passed explicitly. If the current session is detected and does not match the persisted workflow driver, stop before writing artifacts.
+`main` and `plan-code` are persisted in `run.md`. `/ccc resume <output_folder>` reuses persisted values unless the user passes explicit replacements.
 
-Workflow detection:
+Plan-code selection precedence:
 
 ```text
-1. If the command includes claude-first or codex-first, use it.
-2. Else, if CCC_WORKFLOW is claude-first or codex-first, use it.
-3. Else, run scripts/ccc-detect-session.sh.
-4. If detection prints claude, use claude-first.
-5. If detection prints codex, use codex-first.
-6. If still unknown, stop and ask the user to rerun with claude-first or codex-first.
+1. If the command includes plan-code=<planner>-<coder>, use it.
+2. Else, if CCC_PLAN_CODE is a valid planner-coder pair, use it.
+3. Else, use default plan-code=claude-codex.
 ```
 
-`CCC_WORKFLOW` values are case-sensitive and must be exactly `claude-first` or `codex-first`. Any other value is treated as absent, not as a hard error. Explicit command arguments always override `CCC_WORKFLOW`.
+`CCC_PLAN_CODE` values are case-sensitive and must be one of `claude-codex`, `codex-claude`, `claude-claude`, or `codex-codex`. Any other value is treated as absent.
 
-Detection uses agent-provided environment markers first:
+## Main Detection
+
+Main selection precedence:
+
+```text
+1. If the command includes main=claude or main=codex, use it.
+2. Else, if CCC_MAIN is claude or codex, use it.
+3. Else, use default main=claude.
+```
+
+`CCC_MAIN` values are case-sensitive and must be exactly `claude` or `codex`. Any other value is treated as absent. Explicit command arguments always override `CCC_MAIN`.
+
+Detection uses agent-provided environment markers:
 
 ```text
 CLAUDECODE=1 or CLAUDE_CODE_SESSION_ID present -> claude
@@ -90,9 +122,31 @@ both Claude and Codex markers present -> unknown
 otherwise -> unknown
 ```
 
-Shell environment markers are best-effort and are not guaranteed in every app. `CODEX_CI=1` is the practical Codex marker today, but codex-first users should pass `codex-first` explicitly when the marker is absent or inherited shell state is ambiguous. Explicit workflow arguments are authoritative. Do not rely on parent-process names except as a future fallback; wrappers, sandboxes, tmux, and login shells make process-name detection unstable.
+Shell markers are best-effort. Do not rely on parent-process names except as a future fallback; wrappers, sandboxes, tmux, and login shells make process-name detection unstable.
 
-Mode behavior:
+The coordinator still runs `scripts/ccc-detect-session.sh` at run start and records `session_detected`. If detection confidently reports a different agent from the selected `main`, stop before writing stage artifacts unless the user explicitly confirms the mismatch. A Codex user should pass `main=codex` or set `CCC_MAIN=codex`.
+
+## Stage Ownership
+
+`plan-code=<planner>-<coder>` controls ownership:
+
+```text
+plan_vN          planner
+plan_vN_review   coder
+code_vN          coder
+review_vN        planner
+```
+
+The coordinator is the `main` agent. If a stage owner equals `main`, perform the stage directly in the current session. If the stage owner differs from `main`, invoke that owner through its non-interactive CLI and then validate the resulting artifact before writing `.done`.
+
+This keeps the common default optimized for model strengths:
+
+```text
+Claude plans and reviews code.
+Codex reviews plans and implements code.
+```
+
+## Modes
 
 ```text
 manual  complete one stage, write its artifact and .done file, update run.md, then stop for user approval before the next stage
@@ -112,53 +166,22 @@ Mode decisions:
 | No version remains and unresolved findings are major or reviewer `BLOCKER` | Block for human decision. | Block for human decision. | Complete or advance with `VERDICT: APPROVE_AUTO_OVERRIDE`. |
 | Hard failure | Block. | Block. | Block. |
 
-Hard failures originate from the coordinator or infrastructure, not from reviewer prose: invalid CLI or auth state, failed commands, missing raw transcripts, validation failure, repository mutation, `HEAD` divergence, invalid baseline, prompt budget overflow, parse errors, and user cancellation. In `auto` mode, content-level reviewer findings cannot block the run by themselves, including security findings, data-corruption risks, public contract breaks, user-visible behavior concerns, or reviewer `BLOCKER` verdicts. They must be preserved in the review artifact and marked as an auto override.
-
-## Roles
-
-```text
-driver    current interactive session; writes task, run, plan, code, state, verdicts, and done files
-reviewer  non-interactive companion agent; provides review findings and review signal
-```
-
-Workflow actors:
-
-```text
-claude-first  driver: claude-code; reviewer: codex-cli
-codex-first   driver: codex; reviewer: claude-code-cli
-```
-
-Driver stages must not create git commits during a CCC run. Keep changes in the working tree and commit only after the workflow reaches a terminal state. This keeps the self-contained review prompt aligned with the run baseline.
-
-Stage ownership:
-
-```text
-plan_vN          driver
-plan_vN_review   reviewer, invoked by driver
-code_vN          driver
-review_vN        reviewer, invoked by driver
-```
-
-The coordinator runs these stages sequentially in one driver session using the mode decision table above.
-
-CCC has no multi-session safety layer. Exactly one coordinator session may be active for a given `<output_folder>` at a time. Starting a second coordinator on the same run can race artifact, `.done`, and `run.md` writes.
+Hard failures originate from the coordinator or infrastructure, not from reviewer prose: invalid CLI or auth state, failed commands, missing raw transcripts, validation failure, repository mutation, `HEAD` divergence, invalid baseline, prompt budget overflow, parse errors, and user cancellation.
 
 ## Rounds
 
-CCC uses zero-based versions. The two numeric arguments are maximum version indexes, equivalent to the number of allowed revisions after the initial `v0`.
-
-Example `2,2` allows these artifacts:
+CCC uses zero-based versions. `p2-c2` allows:
 
 ```text
 plan_v0 -> plan_v0_review -> plan_v1 -> plan_v1_review -> plan_v2
 code_v0 -> review_v0 -> code_v1 -> review_v1 -> code_v2
 ```
 
-This is three possible plan artifacts and three possible code artifacts. The final artifact at the maximum version is a decision point, not automatically an approval in `manual` or `normal` mode. `auto` mode may override unresolved reviewer disagreement at this point.
+The final artifact at the maximum version is a decision point, not automatically an approval in `manual` or `normal` mode. `auto` mode may override unresolved reviewer disagreement at this point.
 
 ## Output Folder
 
-The coordinator creates the run folder if needed:
+The coordinator creates:
 
 ```text
 <output_folder>/
@@ -170,7 +193,7 @@ The coordinator creates the run folder if needed:
 
 ## Run File
 
-When starting a new run, the coordinator writes `<output_folder>/task.md`, captures the run baseline files, and initializes `<output_folder>/run.md`.
+When starting a new run, the coordinator writes `<output_folder>/task.md`, captures the git baseline files, and initializes `<output_folder>/run.md`.
 
 `run.md` must include:
 
@@ -186,43 +209,30 @@ When starting a new run, the coordinator writes `<output_folder>/task.md`, captu
 ## Status
 ```
 
-`## Description` is free-form text for humans.
-
-`## Runtime` records the selected workflow:
+`## Runtime` records:
 
 ```text
-workflow: <claude-first|codex-first>
-driver: <claude-code|codex>
-reviewer: <codex-cli|claude-code-cli>
+main: <claude|codex>
+planner: <claude|codex>
+coder: <claude|codex>
+plan_code: <claude-codex|codex-claude|claude-claude|codex-codex>
 session_detected: <claude|codex|unknown>
-workflow_source: <explicit|env|detected|persisted>
+main_source: <explicit|env|default|persisted>
+plan_code_source: <explicit|env|default|persisted>
 ```
 
-For `claude-first`, `driver` must be `claude-code` and `reviewer` must be `codex-cli`.
+`plan_code` must equal `<planner>-<coder>`.
 
-For `codex-first`, `driver` must be `codex` and `reviewer` must be `claude-code-cli`.
+On resume, `main_source: persisted` and `plan_code_source: persisted` record that stored values were reused for that invocation. CCC does not preserve the original selection source separately.
 
-`session_detected` records the best-effort `scripts/ccc-detect-session.sh` result at run start. It may be `unknown` when shell markers are unavailable or the user selected the workflow explicitly.
-
-`workflow_source` records why the coordinator selected the workflow:
-
-```text
-explicit   user passed claude-first or codex-first
-env        CCC_WORKFLOW selected the workflow
-detected   scripts/ccc-detect-session.sh selected the workflow
-persisted  resume used the workflow already stored in run.md
-```
-
-On resume, `workflow_source: persisted` intentionally records that the stored workflow was reused for this invocation. CCC does not preserve the original selection source separately.
-
-`## Rounds` uses machine-readable fields:
+`## Rounds` uses:
 
 ```text
 plan_rounds: <N>
 revision_rounds: <M>
 ```
 
-`## Git Baseline` records the review base before code changes:
+`## Git Baseline` records:
 
 ```text
 run_start_ref: <git sha or 4b825dc642cb6eb9a060e54bf8d69288fbee4904>
@@ -232,36 +242,19 @@ run_start_unstaged_diff: state/run_start.diff
 run_start_staged_diff: state/run_start_cached.diff
 ```
 
-The coordinator writes those `state/run_start.*` files at run start. `state/run_start.status` is canonical for run-start status; do not duplicate that status inline in `run.md`.
-
 `state/run_start.status` is the exact stdout of `git status --short` at run start. An empty file means the run started clean.
 
-`state/run_start.diff` is the exact stdout of `git diff` at run start.
-
-`state/run_start_cached.diff` is the exact stdout of `git diff --cached` at run start.
-
-For normal repositories, `run_start_ref` is the output of `git rev-parse --verify HEAD` and `run_start_ref_kind` is `head`.
+For normal repositories, `run_start_ref` is `git rev-parse --verify HEAD` and `run_start_ref_kind` is `head`.
 
 For fresh repositories with no commits, `run_start_ref` is the Git empty-tree SHA `4b825dc642cb6eb9a060e54bf8d69288fbee4904` and `run_start_ref_kind` is `empty_tree`.
 
-If `run_start_ref` is neither a valid git ref nor the empty-tree SHA, code review must use `VERDICT: BLOCKER` unless the user provides another explicit diff base.
-
-`## Workflow State` is machine-readable. Do not rely on prose parsing:
+`## Workflow State` is machine-readable:
 
 ```text
 current_stage: <stage|none>
 latest_artifact: <artifact path|none>
 latest_verdict: <APPROVE|APPROVE_WITH_MINOR_COMMENTS|APPROVE_AUTO_OVERRIDE|NEEDS_CHANGES|BLOCKER|none>
 next_action: <stage|complete|blocked|canceled>
-```
-
-Field values are constrained:
-
-```text
-current_stage: none | plan_vN | plan_vN_review | code_vN | review_vN
-latest_artifact: none | artifacts/plan_vN.md | artifacts/plan_vN_review.md | artifacts/code_vN.md | artifacts/review_vN.md
-latest_verdict: APPROVE | APPROVE_WITH_MINOR_COMMENTS | APPROVE_AUTO_OVERRIDE | NEEDS_CHANGES | BLOCKER | none
-next_action: plan_vN | plan_vN_review | code_vN | review_vN | complete | blocked | canceled
 ```
 
 `## Status` must contain exactly one of:
@@ -273,186 +266,94 @@ blocked
 canceled
 ```
 
-Status semantics:
-
-```text
-active    the single-session coordinator is still running or resumable
-complete  the workflow has an approving code review verdict
-blocked   the workflow has a BLOCKER verdict, invalid reviewer output, failed validation, or needs user direction
-canceled  the user canceled the run
-```
-
-The mode decision table routes max-version disagreement to `complete`, `blocked`, or `APPROVE_AUTO_OVERRIDE`; hard failures use `blocked`.
-
 All `run.md` writes use a temporary file in the same directory, then an atomic rename.
 
-## Reviewer Calls
+## Agent Calls
 
-### Invocation Mechanism
+Stages owned by the main agent are performed directly in the current session with the matching stage skill.
 
-Reviewer stages run the companion agent from the shell. The coordinator provides the review prompt on stdin and captures the final reviewer message:
+Stages owned by the other agent use a non-interactive CLI call from the repository root.
+
+For Codex-owned stages:
 
 ```text
-1. Build a reviewer prompt from task.md, the relevant artifacts, and git baseline data.
-2. Run the workflow-specific non-interactive reviewer command from the repository root.
-3. Write the final reviewer message directly to state/<stage>.review.raw.md.
-4. Normalize that raw message into the CCC review artifact.
+codex exec --output-last-message <output-file> -
 ```
 
-All reviewer commands must run with `cwd` set to the repository root. Output paths may be repository-relative or absolute, but they must resolve to the active run folder.
+For Codex-owned read-only review stages, add:
 
-If the reviewer command exits non-zero, the raw transcript is missing, or the raw transcript is empty, stop with `Status: blocked`.
+```text
+--sandbox read-only
+```
 
-### Review Prompt Contract
+For Claude-owned stages:
 
-Both workflows use self-contained, driver-attested review prompts. The reviewer evaluates exactly the task, artifacts, and git outputs the driver includes in the prompt. This keeps Claude-first and Codex-first symmetric and avoids relying on reviewer-specific repository inspection features.
+```text
+claude --print --output-format text --no-session-persistence
+```
 
-This symmetry is a deliberate tradeoff. The reviewer does not independently re-derive the whole changeset from repository state. Review integrity depends on the driver assembling a complete prompt, preserving the raw transcript, and using the pre/post git-diff mutation guard for code review commands.
+For Claude-owned read-only review stages, add:
 
-The driver must include complete required artifacts and complete relevant git outputs in the reviewer prompt. Do not silently truncate. Before invoking the reviewer, compute the UTF-8 byte length of the exact stdin payload that will be sent to the reviewer. The default ceiling is:
+```text
+--tools ""
+```
+
+`--tools ""` is a Claude CLI contract, not an independent sandbox proof. Use `scripts/ccc-check-agent-cli.sh claude` when practical.
+
+## Review Prompt Contract
+
+All cross-agent calls use self-contained prompts. The coordinator includes the task, relevant CCC artifacts, and relevant git outputs. The recipient evaluates exactly the prompt contents.
+
+This symmetry is a deliberate tradeoff. The recipient does not independently re-derive the whole changeset from repository state. Integrity depends on the coordinator assembling a complete prompt, preserving raw transcripts for review stages, and using the pre/post git-diff mutation guard for code review commands.
+
+Before invoking another agent, compute the UTF-8 byte length of the exact stdin payload. The default ceiling is:
 
 ```text
 CCC_REVIEW_PROMPT_MAX_BYTES=200000
 ```
 
-The user may override this environment variable. If the required prompt would exceed the ceiling, stop with `Status: blocked` before writing the raw transcript and report:
+If the prompt would exceed the ceiling, stop with `Status: blocked` before writing the raw transcript and report:
 
 ```text
 Reviewer prompt exceeds CCC_REVIEW_PROMPT_MAX_BYTES; narrow the task, reduce the diff, or raise the limit explicitly.
 ```
 
-If the coordinator intentionally summarizes any diff or artifact to fit a user-raised limit, the review artifact must say so in `## Risks and Unknowns` for code artifacts or `## Questions` for review artifacts, and the reviewer verdict must be `VERDICT: BLOCKER` unless the omitted content is demonstrably irrelevant.
-
-In `claude-first`, plan review uses `codex exec` in read-only mode:
+Reviewer prompts must include:
 
 ```text
-codex exec --sandbox read-only --output-last-message <output_folder>/state/plan_vN_review.review.raw.md -
-```
-
-In `codex-first`, plan review uses `claude --print` with tools disabled. Capture stdout to `state/plan_vN_review.review.raw.md.tmp`, then atomically rename it:
-
-```text
-claude --print --output-format text --no-session-persistence --tools ""
-```
-
-The stdin prompt must ask the reviewer to review `<output_folder>/artifacts/plan_vN.md` against `<output_folder>/task.md`, avoid code edits, and return findings, questions, and whether the plan appears ready for implementation. For `plan_v1+`, include the previous plan and review in the prompt. In both workflows, include the referenced file contents in the prompt instead of relying on file access.
-
-Use this prompt shape:
-
-```text
-You are the CCC plan reviewer for <stage>.
-Read <output_folder>/task.md and <output_folder>/artifacts/plan_vN.md.
-For plan_v1+, also read <output_folder>/artifacts/plan_v{N-1}.md and <output_folder>/artifacts/plan_v{N-1}_review.md.
-
 Do not edit files.
-Review only the artifacts and text included in this prompt. Do not inspect other repository files.
-Review whether the plan is correct, complete, scoped, and ready to implement.
-Return:
-## Summary
-## Findings
+Review only the artifacts and diffs included in this prompt. Do not inspect other repository files.
 Tag each finding as [minor] or [major].
-## Questions
-## Readiness
 READY: yes|no
 ```
 
-The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
+The coordinator maps readiness to CCC verdicts:
 
-The coordinator saves the unnormalized reviewer output for each plan review at:
+```text
+READY: yes with no material findings      -> VERDICT: APPROVE
+READY: yes with only minor findings       -> VERDICT: APPROVE_WITH_MINOR_COMMENTS
+READY: no with fixable findings           -> VERDICT: NEEDS_CHANGES
+READY: no with external blocker/unsafe uncertainty -> VERDICT: BLOCKER
+```
+
+The coordinator saves raw reviewer output at:
 
 ```text
 state/plan_vN_review.review.raw.md
-```
-
-In `claude-first`, code review uses `codex exec` in read-only mode:
-
-```text
-codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.review.raw.md -
-```
-
-When `run_start_ref_kind: head`, confirm `git rev-parse HEAD` equals `run_start_ref` before any code-review command. In that normal case, the driver-supplied git outputs cover staged, unstaged, and untracked working-tree changes. If `HEAD` has moved, stop with `Status: blocked`; the run has a mid-run commit or external repository mutation and no longer satisfies the CCC review baseline. To recover, restore `HEAD` to `run_start_ref` and resume, or cancel the run and start a new one.
-
-In `codex-first`, code review uses `claude --print` with tools disabled:
-
-```text
-claude --print --output-format text --no-session-persistence --tools ""
-```
-
-The stdin prompt must ask the reviewer to review the actual repository changes, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready. In both workflows, include the referenced artifact contents and git diff outputs in the prompt instead of relying on file access.
-
-For Codex reviewer commands, use `--sandbox read-only` and do not pass `--dangerously-bypass-approvals-and-sandbox`. For Claude reviewer commands, use `--tools ""`. To guard tracked and staged repository content, capture `git diff` and `git diff --cached` immediately before and after any code-review command. If the before/after outputs differ, stop with `Status: blocked`, report the mutation diff to the user, and require the user to restore or stash those changes before resuming.
-
-Use this prompt shape:
-
-```text
-You are the CCC code reviewer for <stage>.
-Read <output_folder>/task.md, <output_folder>/run.md, and <output_folder>/artifacts/code_vN.md.
-For review_v1+, also read <output_folder>/artifacts/code_v{N-1}.md and <output_folder>/artifacts/review_v{N-1}.md.
-
-Review the actual repository changes, not only code_vN.md.
-Baseline: <run_start_ref>
-For the normal path, HEAD equals the baseline, so review staged, unstaged, and untracked working-tree changes.
-Do not edit files.
-Review only the artifacts and diffs included in this prompt. Do not inspect other repository files.
-Return:
-## Summary
-## Findings
-Tag each finding as [minor] or [major].
-## Tests to Add
-## Questions
-## Readiness
-READY: yes|no
-```
-
-The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
-
-If `run_start_ref_kind` is `empty_tree`, use the same workflow-specific reviewer command and include the relevant diff commands from `Git Review Baseline` in the prompt. The Claude-first command remains:
-
-```text
-codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.review.raw.md -
-```
-
-Use this fallback prompt shape:
-
-```text
-You are the CCC code reviewer for <stage>.
-Read <output_folder>/task.md, <output_folder>/run.md, and <output_folder>/artifacts/code_vN.md.
-For review_v1+, also read <output_folder>/artifacts/code_v{N-1}.md and <output_folder>/artifacts/review_v{N-1}.md.
-
-Review the actual repository changes, not only code_vN.md.
-Baseline: <run_start_ref>
-Use the empty-tree diff commands from Git Review Baseline to inspect the repository state.
-Do not edit files.
-Review only the artifacts and diffs included in this prompt. Do not inspect other repository files.
-Return:
-## Summary
-## Findings
-Tag each finding as [minor] or [major].
-## Tests to Add
-## Questions
-## Readiness
-READY: yes|no
-```
-
-The coordinator must copy or summarize reviewer output into the required review artifact, preserving findings and producing exactly one valid CCC verdict line. If reviewer output does not clearly support a protocol verdict, the coordinator asks the reviewer for clarification with another non-interactive call or stops with `Status: blocked`.
-
-Clarification output must not overwrite the first raw transcript. Append clarification calls to the same `state/<stage>.review.raw.md` file under a clear separator such as `--- Clarification 1 ---`, then normalize from the combined raw transcript.
-
-The coordinator saves the unnormalized reviewer output for each code review at:
-
-```text
 state/review_vN.review.raw.md
 ```
 
-The CCC review artifact is an attested summary of the raw reviewer output, not a replacement for it. The coordinator may write the final `VERDICT:` line itself after interpreting the raw output, but it must not silently soften or discard material findings. If the raw output does not clearly support one protocol verdict, stop with `Status: blocked`.
+The CCC review artifact is an attested summary of the raw reviewer output, not a replacement for it. The coordinator may write the final `VERDICT:` line after interpreting the raw output, but it must not silently soften or discard material findings.
 
-Reviewer prose cannot promote a finding to hard-failure status. Hard failures are detected only by coordinator-side checks such as command failure, missing transcript, mutation guard failure, validation failure, prompt budget overflow, or invalid baseline state.
+Reviewer prose cannot promote a finding to hard-failure status. Hard failures are detected only by coordinator-side checks.
 
 ## Git Review Baseline
 
-`ccc-code-review` must inspect the actual repository, not only `code_vN.md`.
+Driver commits during a run are not allowed. The intended review surface is the working tree relative to `run_start_ref`.
 
-When `run_start_ref_kind` is `head`, use `run_start_ref` as the baseline:
+When `run_start_ref_kind` is `head`, confirm `git rev-parse HEAD` equals `run_start_ref` before any code-review command. If `HEAD` has moved, stop with `Status: blocked`; recover by restoring `HEAD` to `run_start_ref`, or cancel and start a new run.
+
+Use these git outputs in code-review prompts:
 
 ```text
 git status --short
@@ -472,17 +373,11 @@ git diff --cached
 git diff
 ```
 
-Driver commits during a run are not allowed. The intended review surface is the working tree relative to `run_start_ref`; `git diff --cached` and `git diff` catch staged and unstaged tracked changes that are not in `HEAD`.
-
-If the run started dirty, compare current status and diffs against `state/run_start.status`, `state/run_start.diff`, and `state/run_start_cached.diff` before assigning findings to the CCC run.
-
-Each `code_vN.md` must include the run baseline and current `HEAD` under `## Git Baseline`.
-
-Each `review_vN.md` must include the `run_start_ref` from `run.md` under `## Diff Baseline`. Validation must confirm the Diff Baseline SHA equals `run_start_ref`.
+To guard tracked and staged repository content, capture `git diff` and `git diff --cached` immediately before and after any code-review command. If the before/after outputs differ, stop with `Status: blocked`, report the mutation diff to the user, and require the user to restore or stash those changes before resuming.
 
 ## Verdicts
 
-All review artifacts use the same verdict vocabulary:
+All review artifacts use exactly one whole-line verdict:
 
 ```text
 VERDICT: APPROVE
@@ -492,91 +387,33 @@ VERDICT: NEEDS_CHANGES
 VERDICT: BLOCKER
 ```
 
-Validation must match exactly one whole line with this regex:
-
-```text
-^VERDICT: (APPROVE|APPROVE_WITH_MINOR_COMMENTS|APPROVE_AUTO_OVERRIDE|NEEDS_CHANGES|BLOCKER)$
-```
-
-Do not use substring matching.
-
-`APPROVE`, `APPROVE_WITH_MINOR_COMMENTS`, and `APPROVE_AUTO_OVERRIDE` allow the workflow to advance.
-
 `APPROVE_AUTO_OVERRIDE` is machine-readable evidence that the coordinator proceeded in `auto` mode despite unresolved reviewer disagreement. It must include exactly one whole line beginning with `AUTO OVERRIDE:` in the artifact's `## Summary`.
 
-Validation must reject `APPROVE_AUTO_OVERRIDE` without exactly one `AUTO OVERRIDE:` line in `## Summary`, and must reject `AUTO OVERRIDE:` lines when the verdict is not `APPROVE_AUTO_OVERRIDE`.
+Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge. Findings must be tagged `[minor]` or `[major]`; ambiguous severity is major.
 
-`NEEDS_CHANGES` asks the driver for the next plan or code version, if another version is allowed.
+## Transitions
 
-`BLOCKER` follows the mode decision table.
-
-Minor issues are non-material comments, nits, or follow-up suggestions that do not affect correctness, safety, data integrity, public contracts, user-visible behavior, or verification. Major issues affect one of those areas or make the result unsafe to judge. Findings must be tagged `[minor]` or `[major]` in raw reviewer output, and the coordinator must preserve those tags in the normalized artifact's `## Findings` body. If severity is ambiguous, treat it as major.
-
-When no further plan or code version is allowed, follow the mode decision table. `normal` mode may override unresolved minor-only findings to `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; major unresolved findings block. `auto` mode may override unresolved reviewer disagreement to `VERDICT: APPROVE_AUTO_OVERRIDE`; hard failures still block.
-
-## Planning Transitions
-
-If no plan exists:
+Planning:
 
 ```text
-driver writes artifacts/plan_v0.md
-coordinator writes state/plan_v0.done
-```
-
-If `plan_vN.done` exists and `plan_vN_review.done` does not exist:
-
-```text
-driver runs the workflow-specific reviewer command for plan review
-driver writes state/plan_vN_review.review.raw.md from reviewer output
-driver writes artifacts/plan_vN_review.md from reviewer output
+planner writes artifacts/plan_vN.md
+coordinator writes state/plan_vN.done
+coder reviews plan_vN and writes artifacts/plan_vN_review.md
 coordinator writes state/plan_vN_review.done
 ```
 
-If `plan_vN_review.md` says `VERDICT: APPROVE`, `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, or `VERDICT: APPROVE_AUTO_OVERRIDE`, planning is approved and the driver may write `artifacts/code_v0.md`.
+If plan review approves, move to code. If it requests changes and another plan version is allowed, planner writes the next plan. If no version remains, follow the mode table.
 
-If `plan_vN_review.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/plan_v{N+1}.md`, unless `N` already equals `plan_rounds`.
-
-If `N` already equals `plan_rounds`, follow the mode decision table.
-
-If `plan_vN_review.md` says `VERDICT: BLOCKER`, follow the mode decision table.
-
-In `manual` or `normal` mode, if the final allowed plan version has been written and still is not approved, do not mark the workflow complete. Stop and report:
+Code:
 
 ```text
-Max plan version reached; latest artifact is plan_vN.md and is not approved.
-```
-
-## Code and Review Transitions
-
-After planning is approved:
-
-```text
-driver writes artifacts/code_v0.md
-coordinator writes state/code_v0.done
-```
-
-If `code_vN.done` exists and `review_vN.done` does not exist:
-
-```text
-driver runs the workflow-specific reviewer command for code review
-driver writes state/review_vN.review.raw.md from reviewer output
-driver writes artifacts/review_vN.md from reviewer output
+coder writes artifacts/code_vN.md
+coordinator writes state/code_vN.done
+planner reviews code_vN and writes artifacts/review_vN.md
 coordinator writes state/review_vN.done
 ```
 
-If `review_vN.md` says `VERDICT: APPROVE`, `VERDICT: APPROVE_WITH_MINOR_COMMENTS`, or `VERDICT: APPROVE_AUTO_OVERRIDE`, the workflow is complete.
-
-If `review_vN.md` says `VERDICT: NEEDS_CHANGES`, the driver writes `artifacts/code_v{N+1}.md`, unless `N` already equals `revision_rounds`.
-
-If `N` already equals `revision_rounds`, follow the mode decision table.
-
-If `review_vN.md` says `VERDICT: BLOCKER`, follow the mode decision table.
-
-In `manual` or `normal` mode, if the final allowed code version has been written and still is not approved, do not mark the workflow complete. Stop and report:
-
-```text
-Max code version reached; latest artifact is code_vN.md and is not approved.
-```
+If code review approves, the workflow is complete. If it requests changes and another code version is allowed, coder writes the next code version. If no version remains, follow the mode table.
 
 ## Artifact Contracts
 
@@ -595,8 +432,6 @@ Max code version reached; latest artifact is code_vN.md and is not approved.
 
 `plan_v0.md` must write `Initial plan.` in `Changes Since Previous Plan Version`.
 
-`plan_v1+` must summarize what changed in response to `plan_v{N-1}_review.md`.
-
 `plan_vN_review.md` required sections:
 
 ```text
@@ -605,7 +440,6 @@ Max code version reached; latest artifact is code_vN.md and is not approved.
 ## Findings
 ## Questions
 ## Verdict
-One protocol-approved verdict line.
 ```
 
 Each `plan_vN_review.md` must have a corresponding non-empty raw transcript:
@@ -640,8 +474,6 @@ current_head: <sha|none>
 
 `code_v0.md` must write `Initial implementation.` in `Changes Since Previous Code Version`.
 
-`code_v1+` must summarize what changed in response to `review_v{N-1}.md`.
-
 `review_vN.md` required sections:
 
 ```text
@@ -652,7 +484,6 @@ current_head: <sha|none>
 ## Tests to Add
 ## Questions
 ## Verdict
-One protocol-approved verdict line.
 ```
 
 `## Diff Baseline` must include:
@@ -681,21 +512,20 @@ For every stage, write files in this order:
 7. Update run.md through a same-directory temporary file and atomic rename.
 ```
 
-The `.done` file is the commit point for a stage. Step 3 is a model-side validation against the would-be final filenames; `scripts/ccc-validate.sh` is a post-hoc run-folder validator and does not validate temporary paths. A coordinator resuming after a crash must ignore partial `*.tmp` files until a human intentionally repairs or removes them. Repair removes only files the user names; never sweep `state/*.tmp` or `artifacts/*.tmp` automatically.
+The `.done` file is the commit point for a stage.
 
 ## Validation Before .done
 
-Before writing `.done`, the coordinator validates:
+Before writing `.done`, validate:
 
 ```text
 artifact exists
 artifact is non-empty
 expected top-level heading exists exactly once
-required sections exist exactly as listed in Artifact Contracts
+required sections exist exactly as listed
 review artifacts contain exactly one valid whole-line VERDICT
 APPROVE_AUTO_OVERRIDE has exactly one whole "AUTO OVERRIDE:" line in ## Summary, and no other verdict uses "AUTO OVERRIDE:" lines
-plan_v0 and code_v0 have required non-empty Changes Since text
-plan_v1+ and code_v1+ have non-empty Changes Since sections
+plan_v0 and code_v0 have required Changes Since text
 code_vN Git Baseline contains run_start_ref and current_head
 review_vN Diff Baseline SHA equals run_start_ref from run.md
 plan_vN_review and review_vN have non-empty state/<stage>.review.raw.md files
@@ -710,9 +540,7 @@ code_v(0|[1-9][0-9]*)\.md          -> # Code v\1
 review_v(0|[1-9][0-9]*)\.md        -> # Review v\1
 ```
 
-Versions are decimal integers with no leading zeros except `v0`.
-
-Only the coordinator writes `.done` files. Individual stage skills must not write `.done`.
+Only the coordinator writes `.done` files.
 
 Done file content:
 
@@ -727,15 +555,13 @@ Completed by CCC coordinator after artifact validation.
 
 ## Resume
 
-`/ccc resume <output_folder>` reads `run.md`, `.done` files, artifact verdicts, and the configured rounds, then continues from the next missing stage.
+`/ccc resume <output_folder>` reads `run.md`, `.done` files, artifact verdicts, and configured rounds, then continues from the next missing stage.
 
 Resume must not infer workflow state only from `run.md`; `.done` files and artifact verdicts are the source of truth.
 
-If an artifact exists without the matching `.done`, the previous stage did not commit. The coordinator must stop and ask the user to choose one repair: rerun the stage and overwrite the artifact, move the artifact aside and resume, or manually validate it and write the `.done` only if it satisfies this protocol. If a `.done` exists without its artifact, the run is invalid and must be repaired before resume.
+If an artifact exists without the matching `.done`, stop and ask the user to repair: rerun the stage, move the artifact aside, or manually validate it and write `.done` only if it satisfies this protocol. If `.done` exists without its artifact, the run is invalid and must be repaired before resume.
 
 ## Cancel
-
-To abandon a run, use:
 
 ```text
 /ccc cancel <output_folder> "<reason>"
@@ -745,7 +571,11 @@ The coordinator writes or updates `run.md` with `Status: canceled`, records the 
 
 ## Validator
 
-Use `scripts/ccc-validate.sh <output_folder>` to mechanically validate `run.md`, artifact headings, required sections, verdict lines, baseline keys, and `.done` references for a CCC run.
+Use:
+
+```text
+scripts/ccc-validate.sh <output_folder>
+```
 
 ## Final Output
 
@@ -759,7 +589,7 @@ Next action: <stage|complete|blocked|canceled>
 
 ## Stage Skills
 
-Use these skills:
+Use:
 
 ```text
 ccc

@@ -10,19 +10,19 @@ cleanup() {
 trap cleanup EXIT
 
 usage() {
-  echo "Usage: ccc-check-reviewer-cli.sh <claude-first|codex-first|all>" >&2
+  echo "Usage: ccc-check-agent-cli.sh <claude|codex|all>" >&2
 }
 
 require_help_flag() {
   local haystack=$1
   local needle=$2
   if ! grep -F -- "$needle" >/dev/null <<<"$haystack"; then
-    echo "ccc-check-reviewer-cli: missing required help flag: $needle" >&2
+    echo "ccc-check-agent-cli: missing required help flag: $needle" >&2
     exit 1
   fi
 }
 
-check_claude_first() {
+check_codex() {
   command -v codex >/dev/null
   codex login status >/dev/null
 
@@ -31,10 +31,10 @@ check_claude_first() {
   require_help_flag "$exec_help" "--sandbox"
   require_help_flag "$exec_help" "--output-last-message"
 
-  echo "claude-first reviewer OK: codex exec supports required flags and auth is active"
+  echo "codex agent OK: codex exec supports required flags and auth is active"
 }
 
-check_codex_first() {
+check_claude() {
   command -v claude >/dev/null
 
   local help
@@ -47,7 +47,7 @@ check_codex_first() {
   local ready
   ready=$(printf 'Return READY only.\n' | claude --print --output-format text --no-session-persistence --tools "")
   if ! grep -F "READY" >/dev/null <<<"$ready"; then
-    echo "ccc-check-reviewer-cli: claude stdin smoke test did not return READY" >&2
+    echo "ccc-check-agent-cli: claude stdin smoke test did not return READY" >&2
     exit 1
   fi
 
@@ -67,11 +67,11 @@ check_codex_first() {
   CCC_CHECK_TMPDIR=""
 
   if grep -F "$sentinel" >/dev/null <<<"$response"; then
-    echo "ccc-check-reviewer-cli: claude --tools \"\" exposed a sentinel file" >&2
+    echo "ccc-check-agent-cli: claude --tools \"\" exposed a sentinel file" >&2
     exit 1
   fi
 
-  echo "codex-first reviewer OK: claude accepts required flags and did not expose a sentinel file with tools disabled"
+  echo "claude agent OK: claude accepts required flags and did not expose a sentinel file with tools disabled"
 }
 
 if [ "$#" -ne 1 ]; then
@@ -80,15 +80,15 @@ if [ "$#" -ne 1 ]; then
 fi
 
 case "$1" in
-  claude-first)
-    check_claude_first
+  claude)
+    check_claude
     ;;
-  codex-first)
-    check_codex_first
+  codex)
+    check_codex
     ;;
   all)
-    check_claude_first
-    check_codex_first
+    check_claude
+    check_codex
     ;;
   *)
     usage

@@ -1,6 +1,6 @@
 ---
 name: ccc-plan-review
-description: CCC plan review stage. Run the workflow-specific reviewer CLI to review plan_vN.md and produce plan_vN_review.md. Use only inside CCC.
+description: CCC plan review stage. The configured coder reviews plan_vN.md and produces plan_vN_review.md. Use only inside CCC.
 ---
 # Skill: CCC Plan Review
 
@@ -31,9 +31,11 @@ Do not write `.done`.
 
 ## Rules
 
-* In `claude-first`, run `codex exec --sandbox read-only --output-last-message <RUN>/state/plan_vN_review.review.raw.md -` from the repository root.
-* In `codex-first`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/plan_vN_review.review.raw.md`.
-* In both workflows, include the complete required artifacts in the prompt. Compute the UTF-8 byte length of the exact reviewer stdin payload. If it would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
+* The configured coder owns this stage.
+* If the coder is the main agent, perform the review directly.
+* If the coder is `codex`, run `codex exec --sandbox read-only --output-last-message <RUN>/state/plan_vN_review.review.raw.md -` from the repository root.
+* If the coder is `claude`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/plan_vN_review.review.raw.md`.
+* In all configurations, include the complete required artifacts in the prompt. Compute the UTF-8 byte length of the exact reviewer stdin payload. If it would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
 * Use the plan-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * Tell the reviewer to evaluate only the artifacts and text included in the prompt, without inspecting other repository files.
 * Ask the reviewer for findings tagged `[minor]` or `[major]`, questions, and whether the plan appears ready for implementation.

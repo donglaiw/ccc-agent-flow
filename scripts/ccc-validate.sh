@@ -106,27 +106,32 @@ def parse_run_md() -> tuple[str, str, dict]:
     )
 
     runtime = key_values(section(text, "Runtime"))
-    workflow = runtime.get("workflow")
-    driver = runtime.get("driver")
-    reviewer = runtime.get("reviewer")
+    main = runtime.get("main")
+    planner = runtime.get("planner")
+    coder = runtime.get("coder")
+    plan_code = runtime.get("plan_code")
     session_detected = runtime.get("session_detected")
-    workflow_source = runtime.get("workflow_source")
-    expected = {
-        "claude-first": ("claude-code", "codex-cli"),
-        "codex-first": ("codex", "claude-code-cli"),
-    }
-    if workflow not in expected:
-        err("run.md: Runtime workflow must be claude-first or codex-first")
-    else:
-        expected_driver, expected_reviewer = expected[workflow]
-        if driver != expected_driver:
-            err(f"run.md: Runtime driver must be {expected_driver} for {workflow}")
-        if reviewer != expected_reviewer:
-            err(f"run.md: Runtime reviewer must be {expected_reviewer} for {workflow}")
+    main_source = runtime.get("main_source")
+    plan_code_source = runtime.get("plan_code_source")
+    agents = {"claude", "codex"}
+    if main not in agents:
+        err("run.md: Runtime main must be claude or codex")
+    if planner not in agents:
+        err("run.md: Runtime planner must be claude or codex")
+    if coder not in agents:
+        err("run.md: Runtime coder must be claude or codex")
+    if planner in agents and coder in agents:
+        expected_plan_code = f"{planner}-{coder}"
+        if plan_code != expected_plan_code:
+            err(f"run.md: Runtime plan_code must be {expected_plan_code}")
+    if plan_code not in {"claude-codex", "codex-claude", "claude-claude", "codex-codex"}:
+        err("run.md: Runtime plan_code has invalid value")
     if session_detected not in {"claude", "codex", "unknown"}:
         err("run.md: Runtime session_detected must be claude, codex, or unknown")
-    if workflow_source not in {"explicit", "env", "detected", "persisted"}:
-        err("run.md: Runtime workflow_source must be explicit, env, detected, or persisted")
+    if main_source not in {"explicit", "env", "default", "persisted"}:
+        err("run.md: Runtime main_source must be explicit, env, default, or persisted")
+    if plan_code_source not in {"explicit", "env", "default", "persisted"}:
+        err("run.md: Runtime plan_code_source must be explicit, env, default, or persisted")
 
     rounds = key_values(section(text, "Rounds"))
     for key in ("plan_rounds", "revision_rounds"):

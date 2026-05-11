@@ -2,17 +2,19 @@
 
 ## Description
 
-Example run showing a small `claude-first` CCC flow that finishes with an explicit auto override.
+Example run showing the default CCC stage assignment finishing with an explicit auto override.
 
 This example uses repository SHA `81e5af01a21287343e988d57809bb371e3ad0419` for illustration. Real runs should replace it with the output of `git rev-parse HEAD` at run start.
 
 ## Runtime
 
-workflow: claude-first
-driver: claude-code
-reviewer: codex-cli
+main: claude
+planner: claude
+coder: codex
+plan_code: claude-codex
 session_detected: claude
-workflow_source: detected
+main_source: default
+plan_code_source: default
 
 ## Rounds
 
