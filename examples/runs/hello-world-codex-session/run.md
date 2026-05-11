@@ -2,18 +2,16 @@
 
 ## Description
 
-Example run showing `main=codex plan-code=claude-codex p2-c2 normal`.
+Example run showing the same default stage ownership from a Codex session.
 
 This example uses repository SHA `81e5af01a21287343e988d57809bb371e3ad0419` for illustration. Real runs should replace it with the output of `git rev-parse HEAD` at run start.
 
 ## Runtime
 
-main: codex
 planner: claude
 coder: codex
 plan_code: claude-codex
 session_detected: codex
-main_source: explicit
 plan_code_source: default
 
 ## Rounds

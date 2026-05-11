@@ -8,12 +8,10 @@ This example uses repository SHA `81e5af01a21287343e988d57809bb371e3ad0419` for 
 
 ## Runtime
 
-main: claude
 planner: claude
 coder: codex
 plan_code: claude-codex
 session_detected: claude
-main_source: default
 plan_code_source: default
 
 ## Rounds

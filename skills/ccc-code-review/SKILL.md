@@ -33,7 +33,7 @@ Do not write `.done`.
 ## Rules
 
 * The configured planner owns this stage.
-* If the planner is the main agent, perform the review directly.
+* If the planner is the current session's agent, perform the review directly.
 * If the planner is `codex` and `HEAD` equals `run_start_ref`, run `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.review.raw.md -` from the repository root.
 * If `HEAD` differs from `run_start_ref`, stop as blocked because commits are not allowed during a CCC run.
 * If the planner is `codex` and the baseline is empty-tree, use the same `codex exec --sandbox read-only` reviewer command and include the protocol's fallback prompt and diff commands.

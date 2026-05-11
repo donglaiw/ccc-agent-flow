@@ -1,25 +1,25 @@
 ---
 name: ccc
-description: Coordinate the CCC single-session workflow using configurable main/planner/coder agents, explicit output folders, protocol-defined artifacts, and .done sentinels.
+description: Coordinate the CCC single-session workflow using configurable planner/coder agents, explicit output folders, protocol-defined artifacts, and .done sentinels.
 ---
 # Skill: CCC Coordinator
 
-Use this skill to coordinate a CCC run from one main session. `main=claude|codex` selects the coordinator. `plan-code=<planner>-<coder>` selects who owns planning and implementation.
+Use this skill to coordinate a CCC run from the current session. `plan-code=<planner>-<coder>` selects who owns planning and implementation.
 
 Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical source for syntax, roles, rounds, artifact contracts, validation, resume behavior, cancel behavior, and final output.
 
 ## Coordinator Checklist
 
-1. Parse the requested CCC action: `run`, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, optional `main=claude|codex`, optional `plan-code=<planner>-<coder>`, and optional rounds `pN-cM`; mode is not persisted and `resume` defaults to `normal`.
+1. Parse the requested CCC action: default start, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, optional `plan-code=<planner>-<coder>`, and optional rounds `pN-cM`; mode is not persisted and `resume` defaults to `normal`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
-4. Resolve `main`, defaulting to `main=claude`; explicit `main=...` wins, then `CCC_MAIN`, then default `claude`. Run `scripts/ccc-detect-session.sh` separately and record `session_detected`; stop on a confident mismatch unless the user explicitly confirms it.
+4. Run `scripts/ccc-detect-session.sh` and record `session_detected`; the current session remains the coordinator.
 5. Resolve `plan-code`, defaulting to `claude-codex`; explicit `plan-code=...` wins, then `CCC_PLAN_CODE`, then default.
-6. For a new `run`, confirm required companion CLIs exit successfully, using `scripts/ccc-check-agent-cli.sh <agent>` when practical, or initialize the run as blocked.
-7. For a new `run`, write `task.md` and initialize `run.md`, including `## Runtime` and the git baseline required by the protocol.
+6. For a new start, confirm required companion CLIs exit successfully, using `scripts/ccc-check-agent-cli.sh <agent>` when practical, or initialize the run as blocked.
+7. For a new start, write `task.md` and initialize `run.md`, including `## Runtime` and the git baseline required by the protocol.
 8. Determine the next stage from `.done` files and artifact verdicts.
 9. Resolve the stage owner from `plan-code`: planner owns `plan_vN` and `review_vN`; coder owns `plan_vN_review` and `code_vN`.
-10. If the stage owner is `main`, perform the matching stage skill directly. If not, invoke the owner through its non-interactive CLI.
+10. If the stage owner is the current session's agent, perform the matching stage skill directly. If not, invoke the owner through its non-interactive CLI.
 11. Validate the artifact, write the `.done` file, update `run.md`, and continue according to mode:
    * `manual` stops for user approval after one completed stage.
    * `normal` runs until complete or a human decision is needed.
@@ -27,7 +27,7 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 
 ## Reviewer CLI
 
-Off-main stages are automatic shell commands:
+Stages owned by the other agent are automatic shell commands:
 
 ```text
 1. Build the review prompt from the protocol template.

@@ -106,16 +106,12 @@ def parse_run_md() -> tuple[str, str, dict]:
     )
 
     runtime = key_values(section(text, "Runtime"))
-    main = runtime.get("main")
     planner = runtime.get("planner")
     coder = runtime.get("coder")
     plan_code = runtime.get("plan_code")
     session_detected = runtime.get("session_detected")
-    main_source = runtime.get("main_source")
     plan_code_source = runtime.get("plan_code_source")
     agents = {"claude", "codex"}
-    if main not in agents:
-        err("run.md: Runtime main must be claude or codex")
     if planner not in agents:
         err("run.md: Runtime planner must be claude or codex")
     if coder not in agents:
@@ -128,8 +124,6 @@ def parse_run_md() -> tuple[str, str, dict]:
         err("run.md: Runtime plan_code has invalid value")
     if session_detected not in {"claude", "codex", "unknown"}:
         err("run.md: Runtime session_detected must be claude, codex, or unknown")
-    if main_source not in {"explicit", "env", "default", "persisted"}:
-        err("run.md: Runtime main_source must be explicit, env, default, or persisted")
     if plan_code_source not in {"explicit", "env", "default", "persisted"}:
         err("run.md: Runtime plan_code_source must be explicit, env, default, or persisted")
 

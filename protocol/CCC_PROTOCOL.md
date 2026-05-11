@@ -2,7 +2,7 @@
 
 This file is the canonical CCC workflow specification. README files and skills should point here instead of repeating these rules.
 
-CCC is a single-session coordinator workflow for one incremental code change. The coordinator runs in either Claude Code or Codex, assigns planning and coding stages to Claude or Codex, writes versioned artifacts, and stops at a clear verdict.
+CCC is a single-session coordinator workflow for one incremental code change. The current agent session is the coordinator. CCC assigns planning and coding stages to Claude or Codex, writes versioned artifacts, and stops at a clear verdict.
 
 Do not use `.ccc/current_run`; the output folder is always explicit.
 
@@ -11,19 +11,16 @@ Do not use `.ccc/current_run`; the output folder is always explicit.
 The default run is:
 
 ```text
-main=claude plan-code=claude-codex p2-c2 normal
+plan-code=claude-codex p2-c2 normal
 ```
 
 Meaning:
 
 ```text
-main=claude              Claude Code coordinates the run.
 plan-code=claude-codex   Claude owns planning and code review; Codex owns plan review and coding.
 p2-c2                    allow plan_v0..plan_v2 and code_v0..code_v2.
 normal                   block for human direction on unresolved major disagreement.
 ```
-
-Use `main=codex` when the coordinator should run from Codex because that is where the active context, subscription, or token budget lives.
 
 ## Agents
 
@@ -53,10 +50,12 @@ CCC uses non-interactive companion calls. It must not ask the user to run `/code
 ## Syntax
 
 ```text
-/ccc run <output_folder> "<task>" [pN-cM] [manual|normal|auto] [main=claude|main=codex] [plan-code=<planner>-<coder>]
-/ccc resume <output_folder> [manual|normal|auto] [main=claude|main=codex] [plan-code=<planner>-<coder>]
+/ccc <output_folder> "<task>" [pN-cM] [manual|normal|auto] [plan-code=<planner>-<coder>]
+/ccc resume <output_folder> [manual|normal|auto] [plan-code=<planner>-<coder>]
 /ccc cancel <output_folder> "<reason>"
 ```
+
+Codex may expose the same skill as `$ccc`; use the same arguments.
 
 Valid `plan-code` values:
 
@@ -72,7 +71,6 @@ Optional arguments may appear in any order. Reject duplicate arguments of the sa
 Argument defaults:
 
 ```text
-main       claude
 plan-code  claude-codex
 rounds     p2-c2
 mode       normal
@@ -87,7 +85,7 @@ revision_rounds: M
 
 Mode is not persisted in `run.md`; `/ccc resume <output_folder>` defaults to `normal` unless `manual` or `auto` is passed again.
 
-`main` and `plan-code` are persisted in `run.md`. `/ccc resume <output_folder>` reuses persisted values unless the user passes explicit replacements.
+`plan-code` is persisted in `run.md`. `/ccc resume <output_folder>` reuses the persisted value unless the user passes an explicit replacement.
 
 Plan-code selection precedence:
 
@@ -99,17 +97,7 @@ Plan-code selection precedence:
 
 `CCC_PLAN_CODE` values are case-sensitive and must be one of `claude-codex`, `codex-claude`, `claude-claude`, or `codex-codex`. Any other value is treated as absent.
 
-## Main Detection
-
-Main selection precedence:
-
-```text
-1. If the command includes main=claude or main=codex, use it.
-2. Else, if CCC_MAIN is claude or codex, use it.
-3. Else, use default main=claude.
-```
-
-`CCC_MAIN` values are case-sensitive and must be exactly `claude` or `codex`. Any other value is treated as absent. Explicit command arguments always override `CCC_MAIN`.
+## Session Detection
 
 Detection uses agent-provided environment markers:
 
@@ -122,7 +110,7 @@ otherwise -> unknown
 
 Shell markers are best-effort. Do not rely on parent-process names except as a future fallback; wrappers, sandboxes, tmux, and login shells make process-name detection unstable.
 
-The coordinator still runs `scripts/ccc-detect-session.sh` at run start and records `session_detected`. If detection confidently reports a different agent from the selected `main`, stop before writing stage artifacts unless the user explicitly confirms the mismatch. A Codex user should pass `main=codex` or set `CCC_MAIN=codex`.
+The coordinator records `session_detected` at run start for diagnostics only. The current session is always the coordinator.
 
 ## Stage Ownership
 
@@ -135,9 +123,9 @@ code_vN          coder
 review_vN        planner
 ```
 
-The coordinator is the `main` agent. If a stage owner equals `main`, perform the stage directly in the current session. If the stage owner differs from `main`, invoke that owner through its non-interactive CLI and then validate the resulting artifact before writing `.done`.
+If a stage owner is the current session's agent, perform the stage directly. If the stage owner differs from the current session, invoke that owner through its non-interactive CLI and then validate the resulting artifact before writing `.done`.
 
-Stages owned by `main` run in-session. Stages owned by the other agent use a CLI subprocess and consume prompt budget.
+Stages owned by the current session run in-session. Stages owned by the other agent use a CLI subprocess and consume prompt budget.
 
 This keeps the common default optimized for model strengths and handoff pressure:
 
@@ -216,18 +204,16 @@ When starting a new run, the coordinator writes `<output_folder>/task.md`, captu
 `## Runtime` records:
 
 ```text
-main: <claude|codex>
 planner: <claude|codex>
 coder: <claude|codex>
 plan_code: <claude-codex|codex-claude|claude-claude|codex-codex>
 session_detected: <claude|codex|unknown>
-main_source: <explicit|env|default|persisted>
 plan_code_source: <explicit|env|default|persisted>
 ```
 
 `plan_code` must equal `<planner>-<coder>`.
 
-On resume, `main_source: persisted` and `plan_code_source: persisted` record that stored values were reused for that invocation. CCC does not preserve the original selection source separately.
+On resume, `plan_code_source: persisted` records that the stored value was reused for that invocation. CCC does not preserve the original selection source separately.
 
 `## Rounds` uses:
 
@@ -274,7 +260,7 @@ All `run.md` writes use a temporary file in the same directory, then an atomic r
 
 ## Agent Calls
 
-Stages owned by the main agent are performed directly in the current session with the matching stage skill.
+Stages owned by the current session's agent are performed directly with the matching stage skill.
 
 Stages owned by the other agent use a non-interactive CLI call from the repository root.
 

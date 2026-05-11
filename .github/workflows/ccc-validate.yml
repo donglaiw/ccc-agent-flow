@@ -19,5 +19,5 @@ jobs:
           bash -n scripts/ccc-validate.sh
           bash -n scripts/ccc-check-agent-cli.sh
           scripts/ccc-validate.sh examples/runs/hello-world
-          scripts/ccc-validate.sh examples/runs/hello-world-main-codex
+          scripts/ccc-validate.sh examples/runs/hello-world-codex-session
           scripts/ccc-validate.sh examples/runs/hello-world-auto-override
