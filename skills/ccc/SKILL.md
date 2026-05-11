@@ -13,8 +13,8 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 1. Parse the requested CCC action: `run`, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, and optional workflow `claude-first` or `codex-first`; mode is not persisted and `resume` defaults to `normal`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
-4. Detect or validate the workflow before writing artifacts. Use explicit workflow arguments first, then `CCC_WORKFLOW`, then `scripts/ccc-detect-session.sh` (`claude` maps to `claude-first`; `codex` maps to `codex-first`). If detection is unclear, stop and ask the user to rerun with `claude-first` or `codex-first`.
-5. For a new `run`, confirm the workflow-specific reviewer CLI exits successfully, or initialize the run as blocked.
+4. Detect or validate the workflow before writing artifacts. Use explicit workflow arguments first, then `CCC_WORKFLOW`, then `scripts/ccc-detect-session.sh` (`claude` maps to `claude-first`; `codex` maps to `codex-first`). `CCC_WORKFLOW` is case-sensitive; ignore values other than `claude-first` or `codex-first`. If detection is unclear, stop and ask the user to rerun with `claude-first` or `codex-first`.
+5. For a new `run`, confirm the workflow-specific reviewer CLI exits successfully, using `scripts/ccc-check-reviewer-cli.sh <workflow>` when practical, or initialize the run as blocked.
 6. For a new `run`, write `task.md` and initialize `run.md`, including `## Runtime` and the git baseline required by the protocol.
 7. Determine the next stage from `.done` files and artifact verdicts.
 8. For driver stages, perform the matching stage skill directly.

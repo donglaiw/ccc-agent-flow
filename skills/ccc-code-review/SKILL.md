@@ -36,8 +36,9 @@ Do not write `.done`.
 * If `HEAD` differs from `run_start_ref`, stop as blocked because driver commits are not allowed during a CCC run.
 * In `claude-first`, if the baseline is empty-tree, use the same `codex exec --sandbox read-only` reviewer command and include the protocol's fallback prompt and diff commands.
 * In `codex-first`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/review_vN.review.raw.md`.
-* In both workflows, include the complete required artifacts and relevant git outputs in the prompt. If the prompt would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
+* In both workflows, include the complete required artifacts and relevant git outputs in the prompt. Compute the UTF-8 byte length of the exact reviewer stdin payload. If it would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
 * Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
+* Tell the reviewer to evaluate only the artifacts and diffs included in the prompt, without inspecting other repository files.
 * For Codex reviewer commands, do not pass `--dangerously-bypass-approvals-and-sandbox`.
 * Capture `git diff` and `git diff --cached` before and after reviewer commands; stop as blocked if they differ.
 * Inspect the actual git diff using the `run_start_ref` from `run.md`.

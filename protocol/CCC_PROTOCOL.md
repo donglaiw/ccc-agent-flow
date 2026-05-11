@@ -42,6 +42,14 @@ The `codex-first` workflow requires `claude --print`, `--output-format text`, `-
 printf 'Return READY only.\n' | claude --print --output-format text --no-session-persistence --tools ""
 ```
 
+For a stronger local check, run:
+
+```text
+scripts/ccc-check-reviewer-cli.sh codex-first
+```
+
+This behavioral check creates a temporary sentinel file, asks Claude to read it while `--tools ""` is active, and fails if the sentinel appears in the response. It is still a CLI contract check, not a formal sandbox proof.
+
 If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 ## Syntax
@@ -70,6 +78,8 @@ Workflow detection:
 5. If detection prints codex, use codex-first.
 6. If still unknown, stop and ask the user to rerun with claude-first or codex-first.
 ```
+
+`CCC_WORKFLOW` values are case-sensitive and must be exactly `claude-first` or `codex-first`. Any other value is treated as absent, not as a hard error. Explicit command arguments always override `CCC_WORKFLOW`.
 
 Detection uses agent-provided environment markers first:
 
@@ -203,6 +213,8 @@ detected   scripts/ccc-detect-session.sh selected the workflow
 persisted  resume used the workflow already stored in run.md
 ```
 
+On resume, `workflow_source: persisted` intentionally records that the stored workflow was reused for this invocation. CCC does not preserve the original selection source separately.
+
 `## Rounds` uses machine-readable fields:
 
 ```text
@@ -295,7 +307,9 @@ If the reviewer command exits non-zero, the raw transcript is missing, or the ra
 
 Both workflows use self-contained, driver-attested review prompts. The reviewer evaluates exactly the task, artifacts, and git outputs the driver includes in the prompt. This keeps Claude-first and Codex-first symmetric and avoids relying on reviewer-specific repository inspection features.
 
-The driver must include complete required artifacts and complete relevant git outputs in the reviewer prompt. Do not silently truncate. Before invoking the reviewer, estimate the prompt payload size in bytes. The default ceiling is:
+This symmetry is a deliberate tradeoff. The reviewer does not independently re-derive the whole changeset from repository state. Review integrity depends on the driver assembling a complete prompt, preserving the raw transcript, and using the pre/post git-diff mutation guard for code review commands.
+
+The driver must include complete required artifacts and complete relevant git outputs in the reviewer prompt. Do not silently truncate. Before invoking the reviewer, compute the UTF-8 byte length of the exact stdin payload that will be sent to the reviewer. The default ceiling is:
 
 ```text
 CCC_REVIEW_PROMPT_MAX_BYTES=200000
@@ -331,6 +345,7 @@ Read <output_folder>/task.md and <output_folder>/artifacts/plan_vN.md.
 For plan_v1+, also read <output_folder>/artifacts/plan_v{N-1}.md and <output_folder>/artifacts/plan_v{N-1}_review.md.
 
 Do not edit files.
+Review only the artifacts and text included in this prompt. Do not inspect other repository files.
 Review whether the plan is correct, complete, scoped, and ready to implement.
 Return:
 ## Summary
@@ -378,6 +393,7 @@ Review the actual repository changes, not only code_vN.md.
 Baseline: <run_start_ref>
 For the normal path, HEAD equals the baseline, so review staged, unstaged, and untracked working-tree changes.
 Do not edit files.
+Review only the artifacts and diffs included in this prompt. Do not inspect other repository files.
 Return:
 ## Summary
 ## Findings
@@ -407,6 +423,7 @@ Review the actual repository changes, not only code_vN.md.
 Baseline: <run_start_ref>
 Use the empty-tree diff commands from Git Review Baseline to inspect the repository state.
 Do not edit files.
+Review only the artifacts and diffs included in this prompt. Do not inspect other repository files.
 Return:
 ## Summary
 ## Findings
@@ -428,6 +445,8 @@ state/review_vN.review.raw.md
 ```
 
 The CCC review artifact is an attested summary of the raw reviewer output, not a replacement for it. The coordinator may write the final `VERDICT:` line itself after interpreting the raw output, but it must not silently soften or discard material findings. If the raw output does not clearly support one protocol verdict, stop with `Status: blocked`.
+
+Reviewer prose cannot promote a finding to hard-failure status. Hard failures are detected only by coordinator-side checks such as command failure, missing transcript, mutation guard failure, validation failure, prompt budget overflow, or invalid baseline state.
 
 ## Git Review Baseline
 

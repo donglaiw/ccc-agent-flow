@@ -15,5 +15,9 @@ jobs:
 
       - name: Validate bundled CCC examples
         run: |
+          bash -n scripts/ccc-detect-session.sh
+          bash -n scripts/ccc-validate.sh
+          bash -n scripts/ccc-check-reviewer-cli.sh
           scripts/ccc-validate.sh examples/runs/hello-world
           scripts/ccc-validate.sh examples/runs/hello-world-codex-first
+          scripts/ccc-validate.sh examples/runs/hello-world-auto-override
