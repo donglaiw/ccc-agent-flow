@@ -1,6 +1,6 @@
 ---
 name: ccc-plan-review
-description: CCC plan review stage. Run Codex CLI to review plan_vN.md and produce plan_vN_review.md. Use only inside CCC.
+description: CCC plan review stage. Run the workflow-specific reviewer CLI to review plan_vN.md and produce plan_vN_review.md. Use only inside CCC.
 ---
 # Skill: CCC Plan Review
 
@@ -23,7 +23,7 @@ For `plan_v1+`, also include previous plan review context when available:
 ## Output
 
 ```text
-<RUN>/state/plan_vN_review.codex.raw.md
+<RUN>/state/plan_vN_review.review.raw.md
 <RUN>/artifacts/plan_vN_review.md
 ```
 
@@ -31,13 +31,15 @@ Do not write `.done`.
 
 ## Rules
 
-* Run `codex exec --sandbox read-only --output-last-message <RUN>/state/plan_vN_review.codex.raw.md -` from the repository root.
+* In `claude-first`, run `codex exec --sandbox read-only --output-last-message <RUN>/state/plan_vN_review.review.raw.md -` from the repository root.
+* In `codex-first`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/plan_vN_review.review.raw.md`.
 * Use the plan-review prompt template from `protocol/CCC_PROTOCOL.md`.
-* Ask Codex for findings tagged `[minor]` or `[major]`, questions, and whether the plan appears ready for implementation.
-* Do not let Codex edit code during plan review.
-* Save the raw Codex output to `state/plan_vN_review.codex.raw.md` before writing the review artifact.
-* Preserve Codex findings faithfully when writing the artifact.
-* The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
+* Ask the reviewer for findings tagged `[minor]` or `[major]`, questions, and whether the plan appears ready for implementation.
+* Do not let the reviewer edit code during plan review.
+* Save the raw reviewer output to `state/plan_vN_review.review.raw.md` before writing the review artifact.
+* Preserve reviewer findings faithfully when writing the artifact.
+* The coordinator may write the final CCC `VERDICT:` line after interpreting reviewer output, but must not soften or discard material findings.
+* If the coordinator uses `VERDICT: APPROVE_AUTO_OVERRIDE`, include `AUTO OVERRIDE:` in `## Summary`.
 * Treat ambiguous finding severity as major.
-* If Codex output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
+* If reviewer output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
 * Do not write code artifacts.

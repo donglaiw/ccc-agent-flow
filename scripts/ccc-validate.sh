@@ -14,7 +14,7 @@ from pathlib import Path
 RUN = Path(sys.argv[1])
 EMPTY_TREE = "4b825dc642cb6eb9a060e54bf8d69288fbee4904"
 SHA_RE = re.compile(r"^[0-9a-f]{40}$")
-VERDICT_RE = re.compile(r"^VERDICT: (APPROVE|APPROVE_WITH_MINOR_COMMENTS|NEEDS_CHANGES|BLOCKER)$")
+VERDICT_RE = re.compile(r"^VERDICT: (APPROVE|APPROVE_WITH_MINOR_COMMENTS|APPROVE_AUTO_OVERRIDE|NEEDS_CHANGES|BLOCKER)$")
 VERSION = r"(?:0|[1-9][0-9]*)"
 STAGE_RE = re.compile(rf"^(?:plan_v{VERSION}|plan_v{VERSION}_review|code_v{VERSION}|review_v{VERSION})$")
 
@@ -44,7 +44,7 @@ CONTRACTS = {
 }
 
 STATUS_VALUES = {"active", "complete", "blocked", "max-rounds-reached", "canceled"}
-VERDICT_VALUES = {"APPROVE", "APPROVE_WITH_MINOR_COMMENTS", "NEEDS_CHANGES", "BLOCKER", "none"}
+VERDICT_VALUES = {"APPROVE", "APPROVE_WITH_MINOR_COMMENTS", "APPROVE_AUTO_OVERRIDE", "NEEDS_CHANGES", "BLOCKER", "none"}
 TERMINAL_ACTIONS = {"complete", "blocked", "max-rounds-reached", "canceled"}
 
 errors = []
@@ -102,8 +102,28 @@ def parse_run_md() -> tuple[str, str, dict]:
     require_sections(
         run_md,
         text,
-        ["Description", "Rounds", "Task Summary", "Git Baseline", "Workflow State", "Status"],
+        ["Description", "Runtime", "Rounds", "Task Summary", "Git Baseline", "Workflow State", "Status"],
     )
+
+    runtime = key_values(section(text, "Runtime"))
+    workflow = runtime.get("workflow")
+    driver = runtime.get("driver")
+    reviewer = runtime.get("reviewer")
+    session_detected = runtime.get("session_detected")
+    expected = {
+        "claude-first": ("claude-code", "codex-cli"),
+        "codex-first": ("codex", "claude-code-cli"),
+    }
+    if workflow not in expected:
+        err("run.md: Runtime workflow must be claude-first or codex-first")
+    else:
+        expected_driver, expected_reviewer = expected[workflow]
+        if driver != expected_driver:
+            err(f"run.md: Runtime driver must be {expected_driver} for {workflow}")
+        if reviewer != expected_reviewer:
+            err(f"run.md: Runtime reviewer must be {expected_reviewer} for {workflow}")
+    if session_detected not in {"claude", "codex", "unknown"}:
+        err("run.md: Runtime session_detected must be claude, codex, or unknown")
 
     rounds = key_values(section(text, "Rounds"))
     for key in ("plan_rounds", "revision_rounds"):
@@ -208,11 +228,19 @@ def validate_artifact(path: Path, run_start_ref: str) -> None:
         verdicts = [line for line in text.splitlines() if line.startswith("VERDICT:")]
         if len(verdicts) != 1 or not VERDICT_RE.fullmatch(verdicts[0]):
             err(f"{path}: expected exactly one valid whole-line VERDICT")
-        raw_path = RUN / "state" / f"{path.stem}.codex.raw.md"
+        else:
+            verdict = verdicts[0].split(": ", 1)[1]
+            summary_has_override = "AUTO OVERRIDE:" in section(text, "Summary")
+            text_has_override = "AUTO OVERRIDE:" in text
+            if verdict == "APPROVE_AUTO_OVERRIDE" and not summary_has_override:
+                err(f"{path}: APPROVE_AUTO_OVERRIDE requires AUTO OVERRIDE: in ## Summary")
+            if verdict != "APPROVE_AUTO_OVERRIDE" and text_has_override:
+                err(f"{path}: AUTO OVERRIDE: requires VERDICT: APPROVE_AUTO_OVERRIDE")
+        raw_path = RUN / "state" / f"{path.stem}.review.raw.md"
         if not raw_path.exists():
-            err(f"{path}: missing raw Codex transcript {raw_path}")
+            err(f"{path}: missing raw reviewer transcript {raw_path}")
         elif not read(raw_path).strip():
-            err(f"{path}: raw Codex transcript is empty: {raw_path}")
+            err(f"{path}: raw reviewer transcript is empty: {raw_path}")
 
     if kind == "plan":
         body = non_empty_section(path, text, "Changes Since Previous Plan Version")

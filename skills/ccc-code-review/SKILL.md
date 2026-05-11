@@ -1,6 +1,6 @@
 ---
 name: ccc-code-review
-description: CCC code review stage. Run Codex CLI to review code_vN.md and actual repository changes against the CCC git baseline. Use only inside CCC.
+description: CCC code review stage. Run the workflow-specific reviewer CLI to review code_vN.md and actual repository changes against the CCC git baseline. Use only inside CCC.
 ---
 # Skill: CCC Code Review
 
@@ -24,7 +24,7 @@ For `review_v1+`, also read:
 ## Output
 
 ```text
-<RUN>/state/review_vN.codex.raw.md
+<RUN>/state/review_vN.review.raw.md
 <RUN>/artifacts/review_vN.md
 ```
 
@@ -32,17 +32,19 @@ Do not write `.done`.
 
 ## Rules
 
-* If `HEAD` equals `run_start_ref`, run `codex exec review --uncommitted --output-last-message <RUN>/state/review_vN.codex.raw.md -` from the repository root.
+* In `claude-first`, if `HEAD` equals `run_start_ref`, run `codex exec review --uncommitted --output-last-message <RUN>/state/review_vN.review.raw.md -` from the repository root.
 * If `HEAD` differs from `run_start_ref`, stop as blocked because driver commits are not allowed during a CCC run.
-* If the baseline is empty-tree, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.codex.raw.md -` and include the protocol's fallback prompt and diff commands.
+* In `claude-first`, if the baseline is empty-tree, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.review.raw.md -` and include the protocol's fallback prompt and diff commands.
+* In `codex-first`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/review_vN.review.raw.md`.
 * Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
-* Do not pass `--dangerously-bypass-approvals-and-sandbox`.
-* Capture `git diff` and `git diff --cached` before and after `codex exec review`; stop as blocked if they differ.
+* For Codex reviewer commands, do not pass `--dangerously-bypass-approvals-and-sandbox`.
+* Capture `git diff` and `git diff --cached` before and after reviewer commands; stop as blocked if they differ.
 * Inspect the actual git diff using the `run_start_ref` from `run.md`.
 * Do not trust `code_vN.md` alone.
 * For `review_v1+`, focus on whether prior findings were fixed and whether new issues were introduced.
-* Save the raw Codex output to `state/review_vN.codex.raw.md` before writing the review artifact.
-* Preserve Codex findings faithfully when writing the artifact.
-* The coordinator may write the final CCC `VERDICT:` line after interpreting Codex output, but must not soften or discard material findings.
+* Save the raw reviewer output to `state/review_vN.review.raw.md` before writing the review artifact.
+* Preserve reviewer findings faithfully when writing the artifact.
+* The coordinator may write the final CCC `VERDICT:` line after interpreting reviewer output, but must not soften or discard material findings.
+* If the coordinator uses `VERDICT: APPROVE_AUTO_OVERRIDE`, include `AUTO OVERRIDE:` in `## Summary`.
 * Treat ambiguous finding severity as major.
-* If Codex output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
+* If reviewer output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
