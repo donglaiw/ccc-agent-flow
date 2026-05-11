@@ -13,5 +13,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Validate bundled CCC example
-        run: scripts/ccc-validate.sh examples/runs/hello-world
+      - name: Validate bundled CCC examples
+        run: |
+          scripts/ccc-validate.sh examples/runs/hello-world
+          scripts/ccc-validate.sh examples/runs/hello-world-codex-first

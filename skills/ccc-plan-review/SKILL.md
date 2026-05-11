@@ -33,13 +33,14 @@ Do not write `.done`.
 
 * In `claude-first`, run `codex exec --sandbox read-only --output-last-message <RUN>/state/plan_vN_review.review.raw.md -` from the repository root.
 * In `codex-first`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/plan_vN_review.review.raw.md`.
+* In both workflows, include the complete required artifacts in the prompt. If the prompt would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
 * Use the plan-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * Ask the reviewer for findings tagged `[minor]` or `[major]`, questions, and whether the plan appears ready for implementation.
 * Do not let the reviewer edit code during plan review.
 * Save the raw reviewer output to `state/plan_vN_review.review.raw.md` before writing the review artifact.
 * Preserve reviewer findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting reviewer output, but must not soften or discard material findings.
-* If the coordinator uses `VERDICT: APPROVE_AUTO_OVERRIDE`, include `AUTO OVERRIDE:` in `## Summary`.
+* If the coordinator uses `VERDICT: APPROVE_AUTO_OVERRIDE`, include exactly one `AUTO OVERRIDE:` line in `## Summary`.
 * Treat ambiguous finding severity as major.
 * If reviewer output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.
 * Do not write code artifacts.

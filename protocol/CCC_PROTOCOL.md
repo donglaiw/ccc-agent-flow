@@ -22,7 +22,6 @@ codex login
 codex login status
 codex --version
 codex exec --help
-codex exec review --help
 ```
 
 For `codex-first`, install and authenticate the Claude Code CLI:
@@ -35,19 +34,25 @@ claude --print --output-format text --no-session-persistence --tools "" "Return 
 
 CCC uses non-interactive reviewer calls. It must not ask the user to run `/codex:` or `/claude:` slash commands.
 
-The `claude-first` workflow targets `codex-cli 0.128.0` or newer and requires `codex login status`, `codex exec`, `codex exec review`, `--uncommitted`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
+The `claude-first` workflow targets `codex-cli 0.128.0` or newer and requires `codex login status`, `codex exec`, `--sandbox read-only`, and `--output-last-message`. If the installed CLI version differs, verify those commands before starting a CCC run.
 
-The `codex-first` workflow requires `claude --print`, `--output-format text`, `--no-session-persistence`, and `--tools ""`. If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
+The `codex-first` workflow requires `claude --print`, `--output-format text`, `--no-session-persistence`, and `--tools ""`. `claude --help` must document that `--tools ""` disables all tools. The compatibility precheck must also run a stdin smoke test such as:
+
+```text
+printf 'Return READY only.\n' | claude --print --output-format text --no-session-persistence --tools ""
+```
+
+If compatibility or authentication cannot be confirmed, initialize the run as `Status: blocked` and stop before writing stage artifacts.
 
 ## Syntax
 
 ```text
-/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds] [manual|normal|auto] [claude-first|codex-first|auto-detect]
-/ccc resume <output_folder> [manual|normal|auto] [claude-first|codex-first|auto-detect]
+/ccc run <output_folder> "<task>" [plan_rounds,revision_rounds] [manual|normal|auto] [claude-first|codex-first]
+/ccc resume <output_folder> [manual|normal|auto] [claude-first|codex-first]
 /ccc cancel <output_folder> "<reason>"
 ```
 
-If rounds are omitted, use `2,2`. If mode is omitted, use `normal`. If workflow is omitted, use `auto-detect`. Optional arguments may appear in any order: parse `manual`, `normal`, or `auto` as mode; `claude-first`, `codex-first`, or `auto-detect` as workflow; and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
+If rounds are omitted, use `2,2`. If mode is omitted, use `normal`. If workflow is omitted on `run`, detect it. If workflow is omitted on `resume`, use the persisted workflow. Optional arguments may appear in any order: parse `manual`, `normal`, or `auto` as mode; `claude-first` or `codex-first` as workflow; and `N,M` as rounds. Reject the command if two optional arguments of the same type are provided.
 
 On parse errors or failed workflow detection, print the error and stop without creating or modifying the run folder.
 
@@ -71,10 +76,11 @@ Detection uses agent-provided environment markers first:
 ```text
 CLAUDECODE=1 or CLAUDE_CODE_SESSION_ID present -> claude
 CODEX_CI=1 -> codex
+both Claude and Codex markers present -> unknown
 otherwise -> unknown
 ```
 
-Shell environment markers are best-effort and are not guaranteed in every app. Explicit workflow arguments are authoritative. Do not rely on parent-process names except as a future fallback; wrappers, sandboxes, tmux, and login shells make process-name detection unstable.
+Shell environment markers are best-effort and are not guaranteed in every app. `CODEX_CI=1` is the practical Codex marker today, but codex-first users should pass `codex-first` explicitly when the marker is absent or inherited shell state is ambiguous. Explicit workflow arguments are authoritative. Do not rely on parent-process names except as a future fallback; wrappers, sandboxes, tmux, and login shells make process-name detection unstable.
 
 Mode behavior:
 
@@ -91,12 +97,12 @@ Mode decisions:
 | Any stage completes | Stop for user approval before the next stage. | Continue. | Continue. |
 | Review approves | Continue, subject to the manual approval stop above. | Continue. | Continue. |
 | Review requests changes and another version is allowed | Stop for user approval before the next stage. | Write the next version. | Write the next version. |
-| Review reports `BLOCKER` and another version is allowed | Block unless the user explicitly directs a clear fix. | Block unless the user explicitly directs a clear fix. | Treat as reviewer disagreement and write the next version, unless it is a hard failure. |
+| Review reports `BLOCKER` and another version is allowed | Block unless the user explicitly directs a clear fix. | Block unless the user explicitly directs a clear fix. | Treat as content-level reviewer disagreement and write the next version. |
 | No version remains and unresolved findings are minor-only | Complete or advance with `VERDICT: APPROVE_WITH_MINOR_COMMENTS`. | Complete or advance with `VERDICT: APPROVE_WITH_MINOR_COMMENTS`. | Complete or advance with `VERDICT: APPROVE_AUTO_OVERRIDE`. |
-| No version remains and unresolved findings are major or `BLOCKER` | Block for human decision. | Block for human decision. | Complete or advance with `VERDICT: APPROVE_AUTO_OVERRIDE`, unless it is a hard failure. |
+| No version remains and unresolved findings are major or reviewer `BLOCKER` | Block for human decision. | Block for human decision. | Complete or advance with `VERDICT: APPROVE_AUTO_OVERRIDE`. |
 | Hard failure | Block. | Block. | Block. |
 
-Hard failures are infrastructure or protocol failures: invalid CLI or auth state, failed commands, missing raw transcripts, validation failure, repository mutation, `HEAD` divergence, invalid baseline, parse errors, and user cancellation. In `auto` mode, content-level findings cannot block the run by themselves, including security findings, data-corruption risks, public contract breaks, or user-visible behavior concerns. They must be preserved in the review artifact and marked as an auto override.
+Hard failures originate from the coordinator or infrastructure, not from reviewer prose: invalid CLI or auth state, failed commands, missing raw transcripts, validation failure, repository mutation, `HEAD` divergence, invalid baseline, prompt budget overflow, parse errors, and user cancellation. In `auto` mode, content-level reviewer findings cannot block the run by themselves, including security findings, data-corruption risks, public contract breaks, user-visible behavior concerns, or reviewer `BLOCKER` verdicts. They must be preserved in the review artifact and marked as an auto override.
 
 ## Roles
 
@@ -112,7 +118,7 @@ claude-first  driver: claude-code; reviewer: codex-cli
 codex-first   driver: codex; reviewer: claude-code-cli
 ```
 
-Driver stages must not create git commits during a CCC run. Keep changes in the working tree and commit only after the workflow reaches a terminal state. This keeps `codex exec review --uncommitted` aligned with the run baseline.
+Driver stages must not create git commits during a CCC run. Keep changes in the working tree and commit only after the workflow reaches a terminal state. This keeps the self-contained review prompt aligned with the run baseline.
 
 Stage ownership:
 
@@ -179,6 +185,7 @@ workflow: <claude-first|codex-first>
 driver: <claude-code|codex>
 reviewer: <codex-cli|claude-code-cli>
 session_detected: <claude|codex|unknown>
+workflow_source: <explicit|env|detected|persisted>
 ```
 
 For `claude-first`, `driver` must be `claude-code` and `reviewer` must be `codex-cli`.
@@ -186,6 +193,15 @@ For `claude-first`, `driver` must be `claude-code` and `reviewer` must be `codex
 For `codex-first`, `driver` must be `codex` and `reviewer` must be `claude-code-cli`.
 
 `session_detected` records the best-effort `scripts/ccc-detect-session.sh` result at run start. It may be `unknown` when shell markers are unavailable or the user selected the workflow explicitly.
+
+`workflow_source` records why the coordinator selected the workflow:
+
+```text
+explicit   user passed claude-first or codex-first
+env        CCC_WORKFLOW selected the workflow
+detected   scripts/ccc-detect-session.sh selected the workflow
+persisted  resume used the workflow already stored in run.md
+```
 
 `## Rounds` uses machine-readable fields:
 
@@ -224,7 +240,7 @@ If `run_start_ref` is neither a valid git ref nor the empty-tree SHA, code revie
 current_stage: <stage|none>
 latest_artifact: <artifact path|none>
 latest_verdict: <APPROVE|APPROVE_WITH_MINOR_COMMENTS|APPROVE_AUTO_OVERRIDE|NEEDS_CHANGES|BLOCKER|none>
-next_action: <stage|complete|blocked|max-rounds-reached|canceled>
+next_action: <stage|complete|blocked|canceled>
 ```
 
 Field values are constrained:
@@ -233,7 +249,7 @@ Field values are constrained:
 current_stage: none | plan_vN | plan_vN_review | code_vN | review_vN
 latest_artifact: none | artifacts/plan_vN.md | artifacts/plan_vN_review.md | artifacts/code_vN.md | artifacts/review_vN.md
 latest_verdict: APPROVE | APPROVE_WITH_MINOR_COMMENTS | APPROVE_AUTO_OVERRIDE | NEEDS_CHANGES | BLOCKER | none
-next_action: plan_vN | plan_vN_review | code_vN | review_vN | complete | blocked | max-rounds-reached | canceled
+next_action: plan_vN | plan_vN_review | code_vN | review_vN | complete | blocked | canceled
 ```
 
 `## Status` must contain exactly one of:
@@ -242,7 +258,6 @@ next_action: plan_vN | plan_vN_review | code_vN | review_vN | complete | blocked
 active
 complete
 blocked
-max-rounds-reached
 canceled
 ```
 
@@ -252,11 +267,10 @@ Status semantics:
 active    the single-session coordinator is still running or resumable
 complete  the workflow has an approving code review verdict
 blocked   the workflow has a BLOCKER verdict, invalid reviewer output, failed validation, or needs user direction
-max-rounds-reached  reserved defensive status for max-version exhaustion without a mode decision
 canceled  the user canceled the run
 ```
 
-`max-rounds-reached` is reserved for defensive consistency and has no normal coordinator path. The mode decision table routes max-version disagreement to `complete`, `blocked`, or `APPROVE_AUTO_OVERRIDE`; hard failures use `blocked`.
+The mode decision table routes max-version disagreement to `complete`, `blocked`, or `APPROVE_AUTO_OVERRIDE`; hard failures use `blocked`.
 
 All `run.md` writes use a temporary file in the same directory, then an atomic rename.
 
@@ -277,6 +291,24 @@ All reviewer commands must run with `cwd` set to the repository root. Output pat
 
 If the reviewer command exits non-zero, the raw transcript is missing, or the raw transcript is empty, stop with `Status: blocked`.
 
+### Review Prompt Contract
+
+Both workflows use self-contained, driver-attested review prompts. The reviewer evaluates exactly the task, artifacts, and git outputs the driver includes in the prompt. This keeps Claude-first and Codex-first symmetric and avoids relying on reviewer-specific repository inspection features.
+
+The driver must include complete required artifacts and complete relevant git outputs in the reviewer prompt. Do not silently truncate. Before invoking the reviewer, estimate the prompt payload size in bytes. The default ceiling is:
+
+```text
+CCC_REVIEW_PROMPT_MAX_BYTES=200000
+```
+
+The user may override this environment variable. If the required prompt would exceed the ceiling, stop with `Status: blocked` before writing the raw transcript and report:
+
+```text
+Reviewer prompt exceeds CCC_REVIEW_PROMPT_MAX_BYTES; narrow the task, reduce the diff, or raise the limit explicitly.
+```
+
+If the coordinator intentionally summarizes any diff or artifact to fit a user-raised limit, the review artifact must say so in `## Risks and Unknowns` for code artifacts or `## Questions` for review artifacts, and the reviewer verdict must be `VERDICT: BLOCKER` unless the omitted content is demonstrably irrelevant.
+
 In `claude-first`, plan review uses `codex exec` in read-only mode:
 
 ```text
@@ -289,7 +321,7 @@ In `codex-first`, plan review uses `claude --print` with tools disabled. Capture
 claude --print --output-format text --no-session-persistence --tools ""
 ```
 
-The stdin prompt must ask the reviewer to review `<output_folder>/artifacts/plan_vN.md` against `<output_folder>/task.md`, avoid code edits, and return findings, questions, and whether the plan appears ready for implementation. For `plan_v1+`, include the previous plan and review in the prompt. In `codex-first`, Claude reviewer tools are disabled, so include the referenced file contents in the prompt instead of relying on file access.
+The stdin prompt must ask the reviewer to review `<output_folder>/artifacts/plan_vN.md` against `<output_folder>/task.md`, avoid code edits, and return findings, questions, and whether the plan appears ready for implementation. For `plan_v1+`, include the previous plan and review in the prompt. In both workflows, include the referenced file contents in the prompt instead of relying on file access.
 
 Use this prompt shape:
 
@@ -317,23 +349,23 @@ The coordinator saves the unnormalized reviewer output for each plan review at:
 state/plan_vN_review.review.raw.md
 ```
 
-In `claude-first`, code review uses `codex exec review --uncommitted` when `HEAD` has not moved since run start:
+In `claude-first`, code review uses `codex exec` in read-only mode:
 
 ```text
-codex exec review --uncommitted --output-last-message <output_folder>/state/review_vN.review.raw.md -
+codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.review.raw.md -
 ```
 
-Before using this command, confirm `run_start_ref_kind: head` and `git rev-parse HEAD` equals `run_start_ref`. In that normal case, `--uncommitted` is exhaustive because the run baseline is the current `HEAD`; it covers staged, unstaged, and untracked working-tree changes. If `HEAD` has moved, stop with `Status: blocked`; the run has a mid-run commit or external repository mutation and no longer satisfies the CCC review baseline. To recover, restore `HEAD` to `run_start_ref` and resume, or cancel the run and start a new one.
+When `run_start_ref_kind: head`, confirm `git rev-parse HEAD` equals `run_start_ref` before any code-review command. In that normal case, the driver-supplied git outputs cover staged, unstaged, and untracked working-tree changes. If `HEAD` has moved, stop with `Status: blocked`; the run has a mid-run commit or external repository mutation and no longer satisfies the CCC review baseline. To recover, restore `HEAD` to `run_start_ref` and resume, or cancel the run and start a new one.
 
-In `codex-first`, code review uses `claude --print` with tools disabled. The driver must include the relevant task, run, code artifact, previous review context, and git diff outputs in the prompt because the reviewer has no tool access:
+In `codex-first`, code review uses `claude --print` with tools disabled:
 
 ```text
 claude --print --output-format text --no-session-persistence --tools ""
 ```
 
-The stdin prompt must ask the reviewer to review the actual repository changes, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready. In `codex-first`, Claude reviewer tools are disabled, so include the referenced artifact contents and git diff outputs in the prompt instead of relying on file access.
+The stdin prompt must ask the reviewer to review the actual repository changes, include prior review context for `review_v1+`, and return findings, questions, tests to add, and whether the code appears ready. In both workflows, include the referenced artifact contents and git diff outputs in the prompt instead of relying on file access.
 
-`codex exec review` does not accept `--sandbox`; CCC relies on the dedicated review subcommand and must not pass `--dangerously-bypass-approvals-and-sandbox`. To guard tracked and staged repository content, capture `git diff` and `git diff --cached` immediately before and after any code-review command. If the before/after outputs differ, stop with `Status: blocked`, report the mutation diff to the user, and require the user to restore or stash those changes before resuming.
+For Codex reviewer commands, use `--sandbox read-only` and do not pass `--dangerously-bypass-approvals-and-sandbox`. For Claude reviewer commands, use `--tools ""`. To guard tracked and staged repository content, capture `git diff` and `git diff --cached` immediately before and after any code-review command. If the before/after outputs differ, stop with `Status: blocked`, report the mutation diff to the user, and require the user to restore or stash those changes before resuming.
 
 Use this prompt shape:
 
@@ -358,7 +390,7 @@ READY: yes|no
 
 The coordinator maps readiness to CCC verdicts: `READY: yes` with no material findings becomes `VERDICT: APPROVE`; `READY: yes` with only minor findings becomes `VERDICT: APPROVE_WITH_MINOR_COMMENTS`; `READY: no` with fixable findings becomes `VERDICT: NEEDS_CHANGES`; `READY: no` because of an external blocker or unsafe uncertainty becomes `VERDICT: BLOCKER`.
 
-If `run_start_ref_kind` is `empty_tree` in `claude-first`, use `codex exec --sandbox read-only` instead because `codex exec review --uncommitted` only covers changes against current `HEAD`. Include the relevant diff commands from `Git Review Baseline` in the prompt:
+If `run_start_ref_kind` is `empty_tree`, use the same workflow-specific reviewer command and include the relevant diff commands from `Git Review Baseline` in the prompt. The Claude-first command remains:
 
 ```text
 codex exec --sandbox read-only --output-last-message <output_folder>/state/review_vN.review.raw.md -
@@ -451,9 +483,9 @@ Do not use substring matching.
 
 `APPROVE`, `APPROVE_WITH_MINOR_COMMENTS`, and `APPROVE_AUTO_OVERRIDE` allow the workflow to advance.
 
-`APPROVE_AUTO_OVERRIDE` is machine-readable evidence that the coordinator proceeded in `auto` mode despite unresolved reviewer disagreement. It must include an `AUTO OVERRIDE:` line in the artifact's `## Summary`.
+`APPROVE_AUTO_OVERRIDE` is machine-readable evidence that the coordinator proceeded in `auto` mode despite unresolved reviewer disagreement. It must include exactly one whole line beginning with `AUTO OVERRIDE:` in the artifact's `## Summary`.
 
-Validation must reject `APPROVE_AUTO_OVERRIDE` without `AUTO OVERRIDE:` in `## Summary`, and must reject `AUTO OVERRIDE:` when the verdict is not `APPROVE_AUTO_OVERRIDE`.
+Validation must reject `APPROVE_AUTO_OVERRIDE` without exactly one `AUTO OVERRIDE:` line in `## Summary`, and must reject `AUTO OVERRIDE:` lines when the verdict is not `APPROVE_AUTO_OVERRIDE`.
 
 `NEEDS_CHANGES` asks the driver for the next plan or code version, if another version is allowed.
 
@@ -642,7 +674,7 @@ artifact is non-empty
 expected top-level heading exists exactly once
 required sections exist exactly as listed in Artifact Contracts
 review artifacts contain exactly one valid whole-line VERDICT
-APPROVE_AUTO_OVERRIDE has "AUTO OVERRIDE:" in ## Summary, and no other verdict uses "AUTO OVERRIDE:"
+APPROVE_AUTO_OVERRIDE has exactly one whole "AUTO OVERRIDE:" line in ## Summary, and no other verdict uses "AUTO OVERRIDE:" lines
 plan_v0 and code_v0 have required non-empty Changes Since text
 plan_v1+ and code_v1+ have non-empty Changes Since sections
 code_vN Git Baseline contains run_start_ref and current_head
@@ -703,7 +735,7 @@ Always end with:
 ```text
 CCC run: <output_folder>
 Stage completed: <stage|none>
-Next action: <stage|complete|blocked|max-rounds-reached|canceled>
+Next action: <stage|complete|blocked|canceled>
 ```
 
 ## Stage Skills

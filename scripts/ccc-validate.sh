@@ -43,9 +43,9 @@ CONTRACTS = {
     "review": ["Summary", "Diff Baseline", "Findings", "Tests to Add", "Questions", "Verdict"],
 }
 
-STATUS_VALUES = {"active", "complete", "blocked", "max-rounds-reached", "canceled"}
+STATUS_VALUES = {"active", "complete", "blocked", "canceled"}
 VERDICT_VALUES = {"APPROVE", "APPROVE_WITH_MINOR_COMMENTS", "APPROVE_AUTO_OVERRIDE", "NEEDS_CHANGES", "BLOCKER", "none"}
-TERMINAL_ACTIONS = {"complete", "blocked", "max-rounds-reached", "canceled"}
+TERMINAL_ACTIONS = {"complete", "blocked", "canceled"}
 
 errors = []
 
@@ -110,6 +110,7 @@ def parse_run_md() -> tuple[str, str, dict]:
     driver = runtime.get("driver")
     reviewer = runtime.get("reviewer")
     session_detected = runtime.get("session_detected")
+    workflow_source = runtime.get("workflow_source")
     expected = {
         "claude-first": ("claude-code", "codex-cli"),
         "codex-first": ("codex", "claude-code-cli"),
@@ -124,6 +125,8 @@ def parse_run_md() -> tuple[str, str, dict]:
             err(f"run.md: Runtime reviewer must be {expected_reviewer} for {workflow}")
     if session_detected not in {"claude", "codex", "unknown"}:
         err("run.md: Runtime session_detected must be claude, codex, or unknown")
+    if workflow_source not in {"explicit", "env", "detected", "persisted"}:
+        err("run.md: Runtime workflow_source must be explicit, env, detected, or persisted")
 
     rounds = key_values(section(text, "Rounds"))
     for key in ("plan_rounds", "revision_rounds"):
@@ -176,7 +179,6 @@ def parse_run_md() -> tuple[str, str, dict]:
     expected_actions = {
         "complete": "complete",
         "blocked": "blocked",
-        "max-rounds-reached": "max-rounds-reached",
         "canceled": "canceled",
     }
     if status in expected_actions and next_action != expected_actions[status]:
@@ -230,11 +232,19 @@ def validate_artifact(path: Path, run_start_ref: str) -> None:
             err(f"{path}: expected exactly one valid whole-line VERDICT")
         else:
             verdict = verdicts[0].split(": ", 1)[1]
-            summary_has_override = "AUTO OVERRIDE:" in section(text, "Summary")
-            text_has_override = "AUTO OVERRIDE:" in text
-            if verdict == "APPROVE_AUTO_OVERRIDE" and not summary_has_override:
-                err(f"{path}: APPROVE_AUTO_OVERRIDE requires AUTO OVERRIDE: in ## Summary")
-            if verdict != "APPROVE_AUTO_OVERRIDE" and text_has_override:
+            summary_override_lines = [
+                line for line in section(text, "Summary").splitlines()
+                if line.startswith("AUTO OVERRIDE:")
+            ]
+            override_lines = [
+                line for line in text.splitlines()
+                if line.startswith("AUTO OVERRIDE:")
+            ]
+            if verdict == "APPROVE_AUTO_OVERRIDE" and len(summary_override_lines) != 1:
+                err(f"{path}: APPROVE_AUTO_OVERRIDE requires exactly one AUTO OVERRIDE: line in ## Summary")
+            if verdict == "APPROVE_AUTO_OVERRIDE" and len(override_lines) != 1:
+                err(f"{path}: AUTO OVERRIDE: must appear only once")
+            if verdict != "APPROVE_AUTO_OVERRIDE" and override_lines:
                 err(f"{path}: AUTO OVERRIDE: requires VERDICT: APPROVE_AUTO_OVERRIDE")
         raw_path = RUN / "state" / f"{path.stem}.review.raw.md"
         if not raw_path.exists():

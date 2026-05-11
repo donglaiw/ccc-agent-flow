@@ -2,17 +2,17 @@
 
 ## Description
 
-Example run showing a small `claude-first` CCC flow with reviewer stages.
+Example run showing a small `codex-first` CCC flow with reviewer stages.
 
 This example uses repository SHA `81e5af01a21287343e988d57809bb371e3ad0419` for illustration. Real runs should replace it with the output of `git rev-parse HEAD` at run start.
 
 ## Runtime
 
-workflow: claude-first
-driver: claude-code
-reviewer: codex-cli
-session_detected: claude
-workflow_source: detected
+workflow: codex-first
+driver: codex
+reviewer: claude-code-cli
+session_detected: codex
+workflow_source: explicit
 
 ## Rounds
 

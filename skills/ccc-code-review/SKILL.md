@@ -32,10 +32,11 @@ Do not write `.done`.
 
 ## Rules
 
-* In `claude-first`, if `HEAD` equals `run_start_ref`, run `codex exec review --uncommitted --output-last-message <RUN>/state/review_vN.review.raw.md -` from the repository root.
+* In `claude-first`, if `HEAD` equals `run_start_ref`, run `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.review.raw.md -` from the repository root.
 * If `HEAD` differs from `run_start_ref`, stop as blocked because driver commits are not allowed during a CCC run.
-* In `claude-first`, if the baseline is empty-tree, use `codex exec --sandbox read-only --output-last-message <RUN>/state/review_vN.review.raw.md -` and include the protocol's fallback prompt and diff commands.
+* In `claude-first`, if the baseline is empty-tree, use the same `codex exec --sandbox read-only` reviewer command and include the protocol's fallback prompt and diff commands.
 * In `codex-first`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/review_vN.review.raw.md`.
+* In both workflows, include the complete required artifacts and relevant git outputs in the prompt. If the prompt would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
 * Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
 * For Codex reviewer commands, do not pass `--dangerously-bypass-approvals-and-sandbox`.
 * Capture `git diff` and `git diff --cached` before and after reviewer commands; stop as blocked if they differ.
@@ -45,6 +46,6 @@ Do not write `.done`.
 * Save the raw reviewer output to `state/review_vN.review.raw.md` before writing the review artifact.
 * Preserve reviewer findings faithfully when writing the artifact.
 * The coordinator may write the final CCC `VERDICT:` line after interpreting reviewer output, but must not soften or discard material findings.
-* If the coordinator uses `VERDICT: APPROVE_AUTO_OVERRIDE`, include `AUTO OVERRIDE:` in `## Summary`.
+* If the coordinator uses `VERDICT: APPROVE_AUTO_OVERRIDE`, include exactly one `AUTO OVERRIDE:` line in `## Summary`.
 * Treat ambiguous finding severity as major.
 * If reviewer output does not clearly support a verdict, append a clarification call to the same raw transcript or stop as blocked.

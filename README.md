@@ -1,114 +1,140 @@
 # ccc-agent-flow
 
-CCC is a single-session coordinator workflow that can run Claude-first or Codex-first.
+CCC is a single-session coordinator workflow for pairing Claude Code and Codex. The active session is the driver: it plans, implements, writes artifacts, and invokes the other agent non-interactively for review.
 
-The active session plans and implements, then runs the other agent non-interactively for review stages in the same repository.
+The canonical protocol lives in [protocol/CCC_PROTOCOL.md](protocol/CCC_PROTOCOL.md).
 
-## Usage
+## Workflows
 
-Install and authenticate the reviewer CLI for the workflow you want.
+| Workflow | Driver | Reviewer | Reviewer command |
+|---|---|---|---|
+| `claude-first` | Claude Code | Codex CLI | `codex exec --sandbox read-only ...` |
+| `codex-first` | Codex | Claude Code CLI | `claude --print ... --tools ""` |
 
-For Claude-first runs, Claude Code is the driver and Codex CLI is the reviewer:
+Install and authenticate the reviewer CLI for the workflow you use.
+
+For `claude-first`:
 
 ```text
 codex login
 codex login status
 codex --version
 codex exec --help
-codex exec review --help
 ```
 
-For Codex-first runs, Codex is the driver and Claude Code CLI is the reviewer:
+For `codex-first`:
 
 ```text
 claude --version
 claude --help
-claude --print --output-format text --no-session-persistence --tools "" "Return READY"
+printf 'Return READY only.\n' | claude --print --output-format text --no-session-persistence --tools ""
 ```
 
-The canonical protocol pins the supported reviewer command surfaces. If compatibility is unclear, CCC should block before writing stage artifacts.
+## Usage
 
-Run CCC from the driver session:
+Run from the driver session:
 
 ```text
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2
 ```
 
-CCC tries to detect whether it is running in a Claude Code or Codex session at startup. If detection is unclear, pass the workflow explicitly:
+Pass the workflow explicitly when detection is unclear:
 
 ```text
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 claude-first
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 codex-first
 ```
 
-The helper `scripts/ccc-detect-session.sh` performs env-var-first best-effort detection: `CLAUDECODE=1` or `CLAUDE_CODE_SESSION_ID` means `claude`, and `CODEX_CI=1` means `codex`. Some apps do not expose reliable shell markers, so explicit `claude-first` or `codex-first` is always valid.
+Resume or cancel:
 
-Default mode is `normal`: CCC keeps running automatically, but waits for a human decision if major reviewer disagreement remains after the configured rounds.
+```text
+/ccc resume .ccc/runs/auth-fix
+/ccc cancel .ccc/runs/auth-fix "No longer needed"
+```
 
-Use `manual` to require approval after each completed CCC stage:
+## Detection
+
+`scripts/ccc-detect-session.sh` uses environment markers first:
+
+```text
+CLAUDECODE=1 or CLAUDE_CODE_SESSION_ID present -> claude
+CODEX_CI=1 -> codex
+both present -> unknown
+otherwise -> unknown
+```
+
+Detection maps `claude` to `claude-first` and `codex` to `codex-first`. Explicit `claude-first` or `codex-first` is always authoritative and recommended when running Codex from a shell that may have inherited Claude markers.
+
+`run.md` records:
+
+```text
+workflow: <claude-first|codex-first>
+driver: <claude-code|codex>
+reviewer: <codex-cli|claude-code-cli>
+session_detected: <claude|codex|unknown>
+workflow_source: <explicit|env|detected|persisted>
+```
+
+## Modes
+
+Default mode is `normal`.
+
+| Mode | Behavior |
+|---|---|
+| `manual` | Stop for user approval after each completed stage. |
+| `normal` | Keep running, but block for human direction on major unresolved disagreement. |
+| `auto` | Continue through reviewer disagreement and use `VERDICT: APPROVE_AUTO_OVERRIDE` at the final allowed version. Hard infrastructure or protocol failures still block. |
+
+Examples:
 
 ```text
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 manual
 /ccc resume .ccc/runs/auth-fix manual
-```
-
-Use `auto` to keep going without human approval when the reviewer and driver still disagree. In `auto` mode, content-level reviewer `BLOCKER` findings are overridden at the final allowed version with `VERDICT: APPROVE_AUTO_OVERRIDE`; hard infrastructure or protocol failures still block.
-
-```text
 /ccc run .ccc/runs/auth-fix "Given the context above, implement the auth fix" 2,2 auto
 /ccc resume .ccc/runs/auth-fix auto
 ```
 
 Mode is not persisted; `resume` defaults to `normal` unless `manual` or `auto` is passed again.
 
-Do not commit during an active CCC run; commit after the run reaches a terminal state.
+## Review Contract
 
-Resume an interrupted run:
-
-```text
-/ccc resume .ccc/runs/auth-fix
-```
-
-Cancel a run:
-
-```text
-/ccc cancel .ccc/runs/auth-fix "No longer needed"
-```
-
-The canonical workflow, artifact names, verdicts, validation rules, and round semantics live in [protocol/CCC_PROTOCOL.md](protocol/CCC_PROTOCOL.md).
-
-## How It Works
-
-CCC runs sequentially in one driver session.
-
-The driver writes plan and code artifacts. For review artifacts, the coordinator runs a non-interactive reviewer command, captures the final reviewer message, writes the required Markdown artifact, validates it, and continues. There is no polling loop and no manual reviewer trigger.
-
-Raw reviewer output is kept beside the `.done` files:
+Both workflows use the same self-contained review contract. The driver includes the task, relevant CCC artifacts, and relevant git outputs in the reviewer prompt. The reviewer output is captured as:
 
 ```text
 state/plan_vN_review.review.raw.md
 state/review_vN.review.raw.md
 ```
 
-Only one coordinator session should be active for a given output folder.
-
-Typical Claude-first review calls:
+CCC blocks instead of silently truncating when a reviewer prompt exceeds:
 
 ```text
-codex exec --sandbox read-only --output-last-message .ccc/runs/auth-fix/state/plan_v0_review.review.raw.md -
-codex exec review --uncommitted --output-last-message .ccc/runs/auth-fix/state/review_v0.review.raw.md -
+CCC_REVIEW_PROMPT_MAX_BYTES=200000
 ```
 
-Typical Codex-first review calls use `claude --print --output-format text --no-session-persistence --tools ""` and capture stdout to `state/<stage>.review.raw.md`.
+Current runs require `## Runtime` in `run.md` and `.review.raw.md` transcript names. Older local experiment folders that used `.codex.raw.md` should be recreated or renamed before validation.
 
-## Example
+## Rules
 
-See [examples/runs/hello-world](examples/runs/hello-world) for a complete small run with plan, reviewer-backed review, code, follow-up review, state sentinels, and `run.md`.
+Only one coordinator session should be active for a given output folder.
 
-Validate a run folder with:
+Do not commit during an active CCC run. Commit only after the run reaches a terminal state.
+
+Reviewer commands must not mutate tracked or staged repository content. CCC captures `git diff` and `git diff --cached` before and after code review commands and blocks if they differ.
+
+## Examples
+
+Bundled examples:
+
+```text
+examples/runs/hello-world
+examples/runs/hello-world-codex-first
+```
+
+Validate them with:
 
 ```text
 scripts/ccc-validate.sh examples/runs/hello-world
+scripts/ccc-validate.sh examples/runs/hello-world-codex-first
 ```
 
 ## Skills

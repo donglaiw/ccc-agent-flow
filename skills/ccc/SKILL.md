@@ -10,7 +10,7 @@ Before doing anything else, read `protocol/CCC_PROTOCOL.md`. It is the canonical
 
 ## Coordinator Checklist
 
-1. Parse the requested CCC action: `run`, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, and optional workflow `claude-first`, `codex-first`, or `auto-detect`; mode is not persisted and `resume` defaults to `normal`.
+1. Parse the requested CCC action: `run`, `resume`, or `cancel`, optional mode `manual`, `normal`, or `auto`, and optional workflow `claude-first` or `codex-first`; mode is not persisted and `resume` defaults to `normal`.
 2. Resolve the explicit output folder.
 3. Create the run folder, `artifacts/`, and `state/` if needed.
 4. Detect or validate the workflow before writing artifacts. Use explicit workflow arguments first, then `CCC_WORKFLOW`, then `scripts/ccc-detect-session.sh` (`claude` maps to `claude-first`; `codex` maps to `codex-first`). If detection is unclear, stop and ask the user to rerun with `claude-first` or `codex-first`.
@@ -40,7 +40,7 @@ For code reviews, use `state/review_vN.review.raw.md`.
 
 If a code-review command mutates repository state, the reviewer CLI exits non-zero, produces no raw transcript, or the output does not clearly support a verdict, stop with `Status: blocked`.
 
-In `auto` mode, unresolved reviewer disagreement may be overridden only as described in the protocol. Preserve all review findings, use `VERDICT: APPROVE_AUTO_OVERRIDE`, and write the required `AUTO OVERRIDE:` line in `## Summary`; do not override hard failures.
+In `auto` mode, unresolved reviewer disagreement may be overridden only as described in the protocol. Preserve all review findings, use `VERDICT: APPROVE_AUTO_OVERRIDE`, and write exactly one `AUTO OVERRIDE:` line in `## Summary`; do not override hard failures.
 
 Driver stages must not create git commits during a CCC run.
 
