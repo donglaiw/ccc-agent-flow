@@ -4,7 +4,11 @@ description: CCC code review stage. The configured planner reviews code_vN.md an
 ---
 # Skill: CCC Code Review
 
-Use this skill only inside a CCC run. Read `protocol/CCC_PROTOCOL.md` first and follow its artifact contract for `review_vN.md`.
+Use this skill only inside a CCC run. Read `<CCC_HOME>/protocol/CCC_PROTOCOL.md` first and follow its artifact contract for `review_vN.md`.
+
+## CCC Home
+
+This skill ships the protocol next to itself. Resolve `<CCC_HOME>` before reading anything else: `$CCC_HOME` when set, otherwise this skill's own directory, otherwise a `ccc-duet` checkout root — whichever first contains `protocol/CCC_PROTOCOL.md`. If none resolves, stop as blocked and report the broken install; never reconstruct the protocol or a prompt template from memory. `<CCC_HOME>` is not the target repository — companion CLI calls still run from the target repository root.
 
 ## Inputs
 
@@ -39,7 +43,7 @@ Do not write `.done`.
 * If the planner is `codex` and the baseline is empty-tree, use the same `codex exec --sandbox read-only` reviewer command and include the protocol's fallback prompt and diff commands.
 * If the planner is `claude`, run `claude --print --output-format text --no-session-persistence --tools ""` from the repository root and capture stdout to `state/review_vN.review.raw.md`.
 * In all configurations, include the complete required artifacts and relevant git outputs in the prompt. Compute the UTF-8 byte length of the exact reviewer stdin payload. If it would exceed `CCC_REVIEW_PROMPT_MAX_BYTES` (default `200000`), stop as blocked instead of silently truncating.
-* Use the code-review prompt template from `protocol/CCC_PROTOCOL.md`.
+* Use the code-review prompt template from `<CCC_HOME>/protocol/CCC_PROTOCOL.md`.
 * Tell the reviewer to evaluate only the artifacts and diffs included in the prompt, without inspecting other repository files.
 * For Codex reviewer commands, do not pass `--dangerously-bypass-approvals-and-sandbox`.
 * Capture `git diff` and `git diff --cached` before and after reviewer commands; stop as blocked if they differ.

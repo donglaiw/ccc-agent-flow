@@ -18,6 +18,19 @@ jobs:
           bash -n scripts/ccc-detect-session.sh
           bash -n scripts/ccc-validate.sh
           bash -n scripts/ccc-check-agent-cli.sh
+          bash -n scripts/ccc-install.sh
+          bash -n scripts/ccc-check-install.sh
           scripts/ccc-validate.sh examples/runs/hello-world
           scripts/ccc-validate.sh examples/runs/hello-world-codex-session
           scripts/ccc-validate.sh examples/runs/hello-world-auto-override
+
+      - name: Check skills resolve the protocol and scripts
+        run: scripts/ccc-check-install.sh
+
+      - name: Check both install modes produce a usable install
+        run: |
+          scripts/ccc-install.sh --dest "$RUNNER_TEMP/skills-link" --link
+          scripts/ccc-install.sh --dest "$RUNNER_TEMP/skills-copy" --copy
+          # A copied install must not depend on the checkout staying put.
+          mv "$RUNNER_TEMP/skills-copy" "$RUNNER_TEMP/skills-copy-moved"
+          scripts/ccc-check-install.sh "$RUNNER_TEMP/skills-copy-moved"

@@ -39,7 +39,24 @@ codex login
 claude         # then /login
 ```
 
-Open your coordinator (Claude Code or Codex) and install the skills from `skills/` (`ccc`, `ccc-plan`, `ccc-plan-review`, `ccc-code`, `ccc-code-review`). After install, the coordinator is available as `/ccc` in Claude Code or `$ccc` in Codex.
+Install the five skills (`ccc`, `ccc-plan`, `ccc-plan-review`, `ccc-code`, `ccc-code-review`):
+
+```text
+scripts/ccc-install.sh                      # symlink into ~/.claude/skills
+scripts/ccc-install.sh --copy               # checkout-independent copy
+scripts/ccc-install.sh --dest DIR --force   # another skills dir, replacing existing
+```
+
+After install, the coordinator is available as `/ccc` in Claude Code or `$ccc` in Codex.
+
+Do not install by copying `skills/<name>/` by hand. Each `SKILL.md` reads `<CCC_HOME>/protocol/CCC_PROTOCOL.md` and runs `<CCC_HOME>/scripts/*.sh`, where `<CCC_HOME>` resolves to the skill's own directory. The skills carry `protocol/` and `scripts/` as relative symlinks into this checkout, so a plain `cp -R` leaves them dangling and the run starts without its protocol. `ccc-install.sh --copy` dereferences them; `--link` keeps them pointing here.
+
+Verify an install at any time:
+
+```text
+scripts/ccc-check-install.sh                 # this checkout
+scripts/ccc-check-install.sh ~/.claude/skills
+```
 
 Optional CLI checks:
 

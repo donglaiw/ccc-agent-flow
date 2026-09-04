@@ -51,16 +51,30 @@ Modes:
 | `normal` | Keep running, but block for human direction on major unresolved disagreement. |
 | `auto` | Continue through reviewer disagreement and use `VERDICT: APPROVE_AUTO_OVERRIDE` at the final allowed version. Hard infrastructure or protocol failures still block. |
 
+## CCC Home
+
+The skills are the installed unit, but they do not carry the protocol as prose — each `SKILL.md` reads `<CCC_HOME>/protocol/CCC_PROTOCOL.md` and runs `<CCC_HOME>/scripts/*.sh`. `<CCC_HOME>` resolves from `$CCC_HOME`, else the invoked skill's own directory, else a `ccc-duet` checkout root — the first one containing `protocol/CCC_PROTOCOL.md`.
+
+To make the second option hold, every `skills/<name>/` carries `protocol/` and `scripts/` as relative symlinks to the checkout root. The single canonical copy stays at the repository root, so there is nothing to keep in sync, and an installed skill directory is self-sufficient.
+
+Two consequences worth stating:
+
+- `<CCC_HOME>` is not the target repository. Reviewer CLI calls run from the target repository root; protocol and script paths never do.
+- A hand-rolled `cp -R skills/<name>` produces dangling symlinks and a run with no protocol. Use `scripts/ccc-install.sh` (`--link` to track the checkout, `--copy` to dereference into a standalone install) and `scripts/ccc-check-install.sh` to verify. CI runs both modes.
+
+When `<CCC_HOME>` cannot be resolved, CCC stops as `blocked`. It does not reconstruct the protocol, an artifact contract, or a prompt template from model memory — an unverifiable improvised contract is worse than a stopped run.
+
 ## Environment Variables
 
 | Variable | Values | Purpose |
 |---|---|---|
 | `CCC_PLAN_CODE` | `claude-codex`, `codex-claude`, `claude-claude`, `codex-codex` | Default stage assignment when `plan-code=...` is omitted. |
 | `CCC_REVIEW_PROMPT_MAX_BYTES` | integer byte limit | Maximum UTF-8 byte length of a cross-agent review prompt. Default: `200000`. |
+| `CCC_HOME` | absolute path | Directory holding `protocol/CCC_PROTOCOL.md` and `scripts/`. Overrides skill-directory resolution; useful when the skills are installed as copies but you want them to track a checkout. |
 
 Values are case-sensitive. Invalid values are treated as absent.
 
-`scripts/ccc-detect-session.sh` infers the current session:
+`<CCC_HOME>/scripts/ccc-detect-session.sh` infers the current session:
 
 ```text
 CLAUDECODE=1 or CLAUDE_CODE_SESSION_ID present -> claude
@@ -81,9 +95,12 @@ coder: <claude|codex>
 plan_code: <claude-codex|codex-claude|claude-claude|codex-codex>
 session_detected: <claude|codex|unknown>
 plan_code_source: <explicit|env|default|persisted>
+ccc_home: <absolute path>          # optional provenance
 ```
 
 On resume, persisted values are reused unless explicitly overridden.
+
+`ccc_home` is optional and unvalidated; it records which CCC install drove the run.
 
 ## Review Contract
 

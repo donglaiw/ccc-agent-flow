@@ -6,6 +6,20 @@ CCC is a single-session coordinator workflow for one incremental code change. Th
 
 Do not use `.ccc/current_run`; the output folder is always explicit.
 
+## CCC Home
+
+`<CCC_HOME>` is the directory that ships this protocol and the CCC scripts. It is **not** the target repository, and it is not the current working directory. Every skill resolves it before doing anything else, in this order:
+
+1. `$CCC_HOME`, when set and `$CCC_HOME/protocol/CCC_PROTOCOL.md` exists.
+2. The invoked skill's own directory, which ships `protocol/` and `scripts/` (for example `~/.claude/skills/ccc/protocol/CCC_PROTOCOL.md`).
+3. A `ccc-duet` checkout root that contains `protocol/CCC_PROTOCOL.md`.
+
+If none of the three resolves, the install is incomplete. Stop with `Status: blocked`, report which paths were tried, and point at `<CCC_HOME>/scripts/ccc-install.sh`. Never reconstruct this protocol, an artifact contract, or a prompt template from memory.
+
+The coordinator may record the resolved path in `## Runtime` as an optional `ccc_home:` line for provenance.
+
+All protocol and skill references written as `<CCC_HOME>/...` resolve here. Companion CLI calls for reviewer stages still run from the **target repository root**, which is unrelated to `<CCC_HOME>`.
+
 ## Defaults
 
 The default run is:
@@ -41,8 +55,8 @@ codex   Codex CLI with `codex exec`
 Check local CLI compatibility when practical:
 
 ```text
-scripts/ccc-check-agent-cli.sh claude
-scripts/ccc-check-agent-cli.sh codex
+<CCC_HOME>/scripts/ccc-check-agent-cli.sh claude
+<CCC_HOME>/scripts/ccc-check-agent-cli.sh codex
 ```
 
 CCC uses non-interactive companion calls. It must not ask the user to run `/codex:` or `/claude:` slash commands.
@@ -209,6 +223,7 @@ coder: <claude|codex>
 plan_code: <claude-codex|codex-claude|claude-claude|codex-codex>
 session_detected: <claude|codex|unknown>
 plan_code_source: <explicit|env|default|persisted>
+ccc_home: <absolute path>          # optional provenance
 ```
 
 `plan_code` must equal `<planner>-<coder>`.
@@ -288,7 +303,7 @@ For Claude-owned read-only review stages, add:
 --tools ""
 ```
 
-`--tools ""` is a Claude CLI contract, not an independent sandbox proof. Use `scripts/ccc-check-agent-cli.sh claude` when practical.
+`--tools ""` is a Claude CLI contract, not an independent sandbox proof. Use `<CCC_HOME>/scripts/ccc-check-agent-cli.sh claude` when practical.
 
 ## Review Prompt Contract
 
@@ -564,7 +579,7 @@ The coordinator writes or updates `run.md` with `Status: canceled`, records the 
 Use:
 
 ```text
-scripts/ccc-validate.sh <output_folder>
+<CCC_HOME>/scripts/ccc-validate.sh <output_folder>
 ```
 
 ## Final Output
